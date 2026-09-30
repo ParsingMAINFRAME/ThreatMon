@@ -22,20 +22,25 @@ def main(argv: list[str] | None = None) -> int:
     ingest.add_argument("--connector", required=True, choices=[*registry.names(), "all"])
     ingest.add_argument("--fixture", type=Path, help="Local JSON fixture; always stored as demo data")
     ingest.add_argument("--database-url", help="Override DATABASE_URL for this command")
-    news = subcommands.add_parser("news", help="Bounded NASA news snapshots, separate from the SQL threat store")
+    news = subcommands.add_parser("news", help="Bounded public RSS snapshots, separate from the SQL threat store")
     news_commands = news.add_subparsers(dest="news_command", required=True)
-    news_ingest = news_commands.add_parser("ingest", help="Fetch or revalidate the official NASA RSS snapshot")
-    news_ingest.add_argument("--cache-path", type=Path, help="Override NEWS_SNAPSHOT_PATH for this command")
+    news_ingest = news_commands.add_parser("ingest", help="Fetch or revalidate independent public RSS snapshots")
+    news_ingest.add_argument("--cache-path", type=Path, help="NASA cache path; other feeds use deterministic sibling files")
+    news_ingest.add_argument("--source", choices=["all", "globalvoices", "gdacs", "nasa"], default="all")
     args = parser.parse_args(argv)
     if args.command == "news":
-        from app.news.service import ingest_news
-        result = asyncio.run(ingest_news(args.cache_path or Path(get_settings().news_snapshot_path)))
+        from app.news.service import ingest_sources
+        result = asyncio.run(ingest_sources(args.cache_path or Path(get_settings().news_snapshot_path), source=args.source))
+        records = [article for event in result.events for article in event.articles]
         print(json.dumps({"edition": result.edition, "fetch_state": result.fetch_state,
-                          "events": len(result.events), "articles": sum(len(event.articles) for event in result.events),
+                          "events": len(result.events), "articles": sum(article.record_kind == "article" for article in records),
+                          "official_reports": sum(article.record_kind == "official_report" for article in records),
                           "fetched_at": result.fetched_at.isoformat() if result.fetched_at else None,
                           "last_attempt_at": result.last_attempt_at.isoformat() if result.last_attempt_at else None,
-                          "duplicates_excluded": result.duplicates_excluded, "error": result.error}))
-        return 1 if result.fetch_state == "error" else 0
+                          "duplicates_excluded": result.duplicates_excluded, "error": result.error,
+                          "sources": [source.model_dump(mode="json") for source in result.sources]}))
+        selected = result.sources if args.source == "all" else [source for source in result.sources if source.source_id == args.source]
+        return 1 if any(source.state == "error" for source in selected) else 0
     if args.fixture is not None and args.connector == "all":
         parser.error("--fixture requires a single --connector")
     fixture = None

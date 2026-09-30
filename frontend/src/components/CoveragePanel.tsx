@@ -7,7 +7,7 @@ type CoveragePanelProps = {
   edition: "demo" | "snapshot";
 };
 
-function safeArticleUrl(value: string | null): string | null {
+function safeCoverageUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
@@ -18,21 +18,38 @@ function safeArticleUrl(value: string | null): string | null {
   }
 }
 
+function licenseLabel(value: string): string {
+  const url = new URL(value);
+  const version = url.pathname.match(/^\/licenses\/by\/(\d+\.\d+)\/?$/)?.[1];
+  return ["creativecommons.org", "www.creativecommons.org"].includes(url.hostname) && version
+    ? `CC BY ${version} license`
+    : "Source license";
+}
+
 export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
   if (!event) {
     return (
       <section className="news-coverage news-coverage-empty" id="news-coverage" aria-labelledby="news-coverage-title">
         <p className="news-eyebrow">Selected coverage</p>
         <h2 id="news-coverage-title">Choose an event to inspect its coverage</h2>
-        <p>Select a map marker or an event in the register to see its stories, publishers, timestamps and location basis. If no events match, adjust the filters.</p>
-        <p className="news-coverage-note">{edition === "demo" ? "Synthetic demo edition. These scenarios are fictional, not reports of actual events." : "Stored news snapshot. Reporting may have changed since retrieval."}</p>
+        <p>Select a map marker or an event in the register to see its coverage records, sources, timestamps and location basis. If no events match, adjust the filters.</p>
+        <p className="news-coverage-note">{edition === "demo" ? "Synthetic demo edition. These scenarios are fictional, not reports of actual events." : "Stored source snapshot. Reporting may have changed since retrieval."}</p>
         <p className="news-coverage-note">Edition as of (UTC): {formatNewsTime(asOf)}</p>
       </section>
     );
   }
 
   const isDemo = edition === "demo" || event.is_demo;
+  const officialReports = event.articles.filter((article) => (article.record_kind ?? "article") === "official_report");
+  const newsArticles = event.articles.filter((article) => (article.record_kind ?? "article") === "article");
+  const officialReportCount = event.official_report_count ?? officialReports.length;
+  const newsPublisherCount = event.news_publisher_count ?? new Set(newsArticles.map((article) => article.publisher_id || article.publisher.trim().toLowerCase())).size;
+  const officialSourceCount = event.official_source_count ?? new Set(officialReports.map((article) => article.publisher_id || article.publisher.trim().toLowerCase())).size;
+  const hasOfficialReports = officialReportCount > 0;
+  const hasNewsArticles = event.story_count > 0 || !hasOfficialReports;
+  const coverageHeading = hasOfficialReports ? (hasNewsArticles ? "Coverage records" : "Official reports") : "News articles";
   const location = event.scope === "located" ? event.location : null;
+  const locationSourceUrl = isDemo ? null : safeCoverageUrl(location?.source_url);
   const locationDescription = event.scope === "global"
     ? "Global relevance; no single incident location"
     : location?.label ?? "Location not established; no map point assigned";
@@ -41,20 +58,27 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
     <section className="news-coverage" id="news-coverage" aria-labelledby="news-coverage-title">
       <header className="news-coverage-header">
         <p className="news-eyebrow">Selected coverage / {humanizeNewsLabel(event.category)}</p>
-        <span className="news-coverage-badge">{isDemo ? "Synthetic demo scenario" : "News snapshot"}</span>
+        <span className="news-coverage-badge">{isDemo ? "Synthetic demo scenario" : "Source snapshot"}</span>
         <h2 id="news-coverage-title">{isDemo ? event.title.replace(/^DEMO /, "") : event.title}</h2>
         {isDemo ? <p className="news-coverage-note"><strong>Fictional scenario, not an actual incident.</strong> Severity is an authored assumption.</p> : <p className="news-coverage-summary">{event.summary}</p>}
       </header>
 
       <dl className="news-coverage-metrics">
-        <div><dt>Stories in this view</dt><dd>{event.story_count}</dd></div>
-        <div><dt>Distinct publishers</dt><dd>{event.publisher_count}</dd></div>
+        {hasNewsArticles ? <>
+          <div><dt>News articles</dt><dd>{event.story_count}</dd></div>
+          <div><dt>News publishers</dt><dd>{newsPublisherCount}</dd></div>
+        </> : null}
+        {hasOfficialReports ? <>
+          <div><dt>Official reports</dt><dd>{officialReportCount}</dd></div>
+          <div><dt>Official sources</dt><dd>{officialSourceCount}</dd></div>
+        </> : null}
       </dl>
-      <p className="news-coverage-note">Deduplicated within the current filters. Publisher breadth is not independent corroboration.</p>
+      <p className="news-coverage-note">Deduplicated within the current filters. Source breadth is not independent corroboration.</p>
 
       <dl className="news-coverage-meta">
-        <div><dt>Reporting status</dt><dd>{humanizeNewsLabel(event.status)}</dd></div>
+        <div><dt>Source reporting status</dt><dd>{humanizeNewsLabel(event.status)}</dd></div>
         <div><dt>Severity</dt><dd>{humanizeNewsLabel(event.severity)}</dd></div>
+        {event.source_alert_level ? <div><dt>Source-model alert</dt><dd>{event.source_alert_level}. Source assessment, not confirmed impact.</dd></div> : null}
         <div><dt>Location</dt><dd>{locationDescription}</dd></div>
         <div><dt>Latest publication (UTC)</dt><dd>{formatNewsTime(event.freshest_published_at)}</dd></div>
         <div><dt>Latest retrieval (UTC)</dt><dd>{formatNewsTime(event.last_retrieved_at)}</dd></div>
@@ -63,59 +87,69 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
         <summary>Evidence and location details</summary>
         <dl className="news-coverage-meta">
           <div><dt>Severity basis</dt><dd>{event.severity_basis}</dd></div>
+          {event.source_event_id ? <div><dt>Source event identifier</dt><dd>{event.source_event_id}</dd></div> : null}
           {location ? <>
             <div><dt>Location precision</dt><dd>{humanizeNewsLabel(location.precision)}</dd></div>
             <div><dt>Location confidence</dt><dd>{humanizeNewsLabel(location.confidence)}</dd></div>
             <div><dt>Location basis</dt><dd>{location.basis}</dd></div>
+            {locationSourceUrl ? <div><dt>Location source</dt><dd><a className="news-story-link" href={locationSourceUrl} target="_blank" rel="noopener noreferrer">View geographic source<span className="sr-only"> (opens in a new tab)</span></a></dd></div> : null}
           </> : <>
             <div><dt>Location precision</dt><dd>{event.scope === "global" ? "Not applicable to global coverage" : "Unknown"}</dd></div>
             <div><dt>Location confidence</dt><dd>{event.scope === "global" ? "Not applicable" : "Unknown"}</dd></div>
           </>}
           <div><dt>Edition as of (UTC)</dt><dd>{formatNewsTime(asOf)}</dd></div>
-          <div><dt>Why these stories are grouped</dt><dd>{event.grouping_basis}</dd></div>
+          <div><dt>Distinct publishers and agencies</dt><dd>{event.publisher_count}</dd></div>
+          <div><dt>Why these records are grouped</dt><dd>{event.grouping_basis}</dd></div>
         </dl>
         <p className="news-coverage-note">Status describes available reporting, not independent verification. Syndicated stories may share an original report. Retrieval records collection time, not event time.</p>
       </details>
 
-      <h3>Stories behind this event</h3>
+      <h3>{coverageHeading}</h3>
       {event.articles.length ? (
         <ol className="news-story-list">
           {event.articles.map((article) => {
-            const isSyntheticStory = isDemo || article.is_demo;
-            const url = isSyntheticStory ? null : safeArticleUrl(article.canonical_url);
+            const isSyntheticRecord = isDemo || article.is_demo;
+            const isOfficialReport = (article.record_kind ?? "article") === "official_report";
+            const recordLabel = isOfficialReport ? "Official report" : "News article";
+            const url = isSyntheticRecord ? null : safeCoverageUrl(article.canonical_url);
+            const licenseUrl = isSyntheticRecord ? null : safeCoverageUrl(article.license_url);
+            const hasSourceWindow = Boolean(article.source_window_start || article.source_window_end);
             return (
               <li key={article.id}>
                 <article className="news-story">
                   <header className="news-story-header">
-                    <p className="news-eyebrow">{isSyntheticStory ? "Synthetic demo story" : "Source story"}</p>
+                    <p className="news-eyebrow">{isSyntheticRecord ? `Synthetic demo / ${recordLabel}` : recordLabel}</p>
                     <h4>{article.headline}</h4>
-                    <p>{article.publisher}{isSyntheticStory ? " / Demo publisher label" : ""}</p>
+                    <p>{article.author ? <>By {article.author} / </> : null}{article.publisher}{isSyntheticRecord ? " / Demo source label" : ""}</p>
                   </header>
                   <dl className="news-story-meta">
                     <div><dt>Published (UTC)</dt><dd>{formatNewsTime(article.published_at)}</dd></div>
                     <div><dt>Retrieved (UTC)</dt><dd>{formatNewsTime(article.retrieved_at)}</dd></div>
+                    {hasSourceWindow ? <div><dt>Source coverage window (UTC)</dt><dd>{formatNewsTime(article.source_window_start ?? null)} to {formatNewsTime(article.source_window_end ?? null)}</dd></div> : null}
                   </dl>
-                  {isSyntheticStory ? (
+                  {hasSourceWindow ? <p className="news-coverage-note">This is the source&apos;s coverage window, not a confirmed occurrence time.</p> : null}
+                  {isSyntheticRecord ? (
                     <details className="news-story-preview">
                       <summary>Read synthetic preview<span className="sr-only">: {article.headline}</span></summary>
                       <div className="news-story-preview-body">
-                        <p><strong>Fictional demonstration text. This is not a real news report.</strong></p>
+                        <p><strong>Fictional demonstration text. This is not a real article or official report.</strong></p>
                         <p>{article.summary}</p>
-                        <p>No external article exists for this synthetic story.</p>
+                        <p>No external source exists for this synthetic record.</p>
                       </div>
                     </details>
                   ) : <>
                     <p>{article.summary}</p>
-                    {url ? <a className="news-story-link" href={url} target="_blank" rel="noopener noreferrer">Read original article<span className="sr-only">: {article.headline} (opens in a new tab)</span></a> : <p className="news-coverage-note">No usable original article URL is available in this snapshot.</p>}
+                    {url ? <div><a className="news-story-link" href={url} target="_blank" rel="noopener noreferrer">{isOfficialReport ? "View official source report" : "Read original article"}<span className="sr-only">: {article.headline} (opens in a new tab)</span></a></div> : <p className="news-coverage-note">No usable original source URL is available in this snapshot.</p>}
+                    {licenseUrl ? <div><a className="news-story-link" href={licenseUrl} target="_blank" rel="noopener noreferrer">{licenseLabel(licenseUrl)}<span className="sr-only"> for {article.headline} (opens in a new tab)</span></a></div> : null}
                   </>}
-                  {article.syndication_key ? <p className="news-coverage-note">A syndication relationship is recorded; this story may share reporting with other publishers.</p> : null}
-                  {article.duplicate_urls.length > 0 ? <p className="news-coverage-note">{article.duplicate_urls.length} duplicate {article.duplicate_urls.length === 1 ? "URL is" : "URLs are"} recorded with this story; they do not add to the story count.</p> : null}
+                  {article.syndication_key ? <p className="news-coverage-note">A syndication relationship is recorded; this record may share reporting with other publishers.</p> : null}
+                  {article.duplicate_urls.length > 0 ? <p className="news-coverage-note">{article.duplicate_urls.length} duplicate {article.duplicate_urls.length === 1 ? "URL is" : "URLs are"} recorded with this item; they do not add to coverage counts.</p> : null}
                 </article>
               </li>
             );
           })}
         </ol>
-      ) : <p className="news-coverage-note">No stories match the current filters for this event.</p>}
+      ) : <p className="news-coverage-note">No records match the current filters for this event.</p>}
     </section>
   );
 }

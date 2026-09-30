@@ -9,6 +9,7 @@
 - Read-only USGS earthquake and CISA KEV clients with provenance.
 - Separate news map with unique-story hotspots, explicit event versus spatial grouping, article coverage, time filters, and synthetic multi-publisher examples.
 - Bounded operator-only NASA news metadata ingestion with conditional caching and separate official/synthetic editions.
+- Real Global Voices article metadata with author/license attribution and GDACS hazard bulletins with source reference locations, distinct official-report counts, independent cache health and retained-publisher filters.
 - Operator CLI ingestion, stable identities, and material-change timelines.
 - Filtered/paginated read-only API and interactive Next.js console.
 - Local vector world atlas with cited USGS points, explicit illustrative demo markers, and unlocated-record handling.
@@ -19,7 +20,7 @@
 ## Next useful milestones
 
 1. Add feed refresh schedules and fetch-health history. The overview already shows the latest fetch outcome, last successful retrieval, and an explicit 24-hour stale-data indicator.
-2. Add permitted general-news coverage with reviewed event associations and defensible geographic evidence; NASA news currently supplies only space/science updates.
+2. Broaden permitted world-news publisher coverage beyond Global Voices, with reviewed event associations and defensible article geography. GDACS provides official hazard bulletins; NASA remains space/science coverage.
 3. Add cross-source event grouping with explainable match rules and analyst overrides.
 4. Add watchlists and source-backed exposure inputs.
 5. Add analyst notes and review states, followed by authentication and access controls.
@@ -27,6 +28,6 @@
 
 ## Reserved scaffolds
 
-NASA near-Earth-object, GDACS, ReliefWeb, and generic RSS modules are placeholders. The separate NASA news feed is implemented under `app/news`. A reserved module's presence is not an
+NASA near-Earth-object, ReliefWeb, generic RSS and the old `app/connectors/gdacs.py` module are placeholders. Working NASA, Global Voices and GDACS news ingestion is implemented under `app/news`. A reserved module's presence is not an
 implemented capability. Geopolitical/infrastructure and AI incident categories are
 schema options without corresponding official connectors.

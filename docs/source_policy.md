@@ -31,9 +31,11 @@ Offline connector fixtures pass through the same normalization and persistence p
 - USGS earthquake GeoJSON: source URLs and publication/update/retrieval timestamps are retained. A published earthquake entry does not by itself establish damage, casualties, or infrastructure disruption.
 - CISA Known Exploited Vulnerabilities: read from the agency-maintained `cisagov/kev-data` mirror with that feed origin retained. Catalog inclusion establishes CISA's published exploitation classification; it does not establish that any particular organization is affected.
 
-- NASA news RSS: bounded headline/link metadata ingestion into a separate cache. These single-publisher space/science updates have unknown severity and remain unlocated. News deduplication and explicit event associations are documented in [news coverage](news.md); synthetic fixtures never appear in the official snapshot edition.
+- Global Voices RSS: international community journalism, retained as headline/link/author metadata under the publisher's attribution policy and CC BY 3.0. Records stay unlocated and severity stays unknown. Author, publisher, original link and license attribution remain visible.
+- GDACS RSS: official hazard bulletins identified by source event type and ID. Episode updates do not inflate story counts. Source GeoRSS points are approximate reference locations, with supporting report URLs. GDACS alert levels describe modelled potential humanitarian impact, not verified damage or a ThreatMon severity score. Source time windows remain separate from publication and retrieval clocks.
+- NASA news RSS: bounded headline/link metadata ingestion into a separate cache. These single-publisher space/science updates have unknown severity and remain unlocated. News deduplication and explicit event associations are documented in [news coverage](news.md); synthetic fixtures never appear in the fetched snapshot edition.
 
-Imports are stored snapshots. Retrieval time and event update time have different meanings. Refreshing the dashboard does not fetch a feed; the operator runs ingestion separately. The NASA near-Earth-object, GDACS, ReliefWeb, and generic RSS clients remain reserved placeholders.
+Imports are stored snapshots. Retrieval time and event update time have different meanings. Refreshing the dashboard does not fetch a feed; the operator runs ingestion separately. Each news feed has independent success/failure clocks and preserves its own last good records. The NASA near-Earth-object, ReliefWeb and generic RSS clients remain reserved placeholders; the old `app/connectors/gdacs.py` placeholder is separate from the implemented GDACS news-bulletin importer in `app/news`.
 
 ## Geographic Evidence
 

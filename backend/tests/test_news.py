@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+import json
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -190,6 +191,9 @@ def test_news_api_is_read_only_and_editions_cannot_mix(tmp_path, monkeypatch):
     app = FastAPI()
     app.include_router(router)
     with TestClient(app) as client:
+        default = client.get("/news")
+        assert default.status_code == 200 and default.json()["edition"] == "snapshot"
+        assert default.json()["fetch_state"] == "never_fetched" and default.json()["events"] == []
         demo = client.get("/news?edition=demo")
         assert demo.status_code == 200 and demo.json()["fetch_state"] == "demo"
         live = client.get("/news?edition=snapshot")
@@ -197,6 +201,24 @@ def test_news_api_is_read_only_and_editions_cannot_mix(tmp_path, monkeypatch):
         assert live.json()["events"] == []
         assert client.get("/news?edition=mixed").status_code == 422
         assert client.post("/news").status_code == 405
+
+
+def test_bare_news_api_returns_stored_publications_without_demo_fallback(tmp_path, monkeypatch):
+    from app.core.config import get_settings
+    from app.news.routes import router
+    path = tmp_path / "news.json"
+    stored = ingest(path, lambda request: httpx.Response(200, content=rss()))
+    monkeypatch.setattr(get_settings(), "news_snapshot_path", str(path))
+    app = FastAPI()
+    app.include_router(router)
+    with TestClient(app) as client:
+        response = client.get("/news")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["edition"] == "snapshot" and body["fetch_state"] == "partial"
+    assert [event["id"] for event in body["events"]] == [event.id for event in stored.events]
+    assert all(not event["is_demo"] for event in body["events"])
+    assert {source["source_id"] for source in body["sources"]} == {"nasa", "globalvoices", "gdacs"}
 
 
 def test_utf16_entity_declaration_and_timezone_free_or_future_dates_rejected():
@@ -242,11 +264,38 @@ def test_failed_atomic_write_does_not_overwrite_good_snapshot(tmp_path, monkeypa
 def test_cli_news_ingest_does_not_initialize_or_touch_sql(tmp_path, monkeypatch, capsys):
     from app import cli
     from app.news import service
-    async def fake_ingest(path):
+    async def fake_ingest(path, *, source):
         assert path == tmp_path / "selected.json"
+        assert source == "all"
         return read_news(path, now=NOW)
-    monkeypatch.setattr(service, "ingest_news", fake_ingest)
+    monkeypatch.setattr(service, "ingest_sources", fake_ingest)
     monkeypatch.setattr(cli, "init_db", lambda *args, **kwargs: pytest.fail("news must not migrate SQL"))
     monkeypatch.setattr(cli, "make_engine", lambda *args, **kwargs: pytest.fail("news must not connect to SQL"))
     assert cli.main(["news", "ingest", "--cache-path", str(tmp_path / "selected.json")]) == 0
     assert '"edition": "snapshot"' in capsys.readouterr().out
+
+
+def test_cli_news_counts_articles_separately_from_official_reports(tmp_path, monkeypatch, capsys):
+    from app import cli
+    from app.news import service
+    from app.news.feeds import parse_gdacs_feed
+    articles, _ = parse_nasa_feed(rss(2), retrieved_at=NOW)
+    official, _ = parse_gdacs_feed(
+        b'<rss xmlns:gdacs="http://www.gdacs.org"><channel><item>'
+        b'<title>Official hazard bulletin</title>'
+        b'<link>https://www.gdacs.org/report.aspx?eventtype=EQ&amp;eventid=123</link>'
+        b'<pubDate>Wed, 30 Sep 2026 10:00:00 GMT</pubDate>'
+        b'<gdacs:eventtype>EQ</gdacs:eventtype><gdacs:eventid>123</gdacs:eventid>'
+        b'<gdacs:episodeid>1</gdacs:episodeid></item></channel></rss>', retrieved_at=NOW,
+    )
+    result = NewsResponse(edition="snapshot", as_of=NOW, fetched_at=NOW, last_attempt_at=NOW,
+                          fetch_state="ok", events=[*articles, *official], source_note="Mocked source metadata.")
+    async def fake_ingest(path, *, source):
+        assert source == "all"
+        return result
+    monkeypatch.setattr(service, "ingest_sources", fake_ingest)
+    assert cli.main(["news", "ingest", "--cache-path", str(tmp_path / "news.json")]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["events"] == 3
+    assert output["articles"] == 2
+    assert output["official_reports"] == 1

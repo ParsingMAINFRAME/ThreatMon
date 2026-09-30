@@ -9,7 +9,7 @@ const loadedModule = { exports: {} };
 const source = readFileSync(path.join(__dirname, '../src/lib/news-view.ts'), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 vm.runInNewContext(compiled, { exports: loadedModule.exports, module: loadedModule, URL, URLSearchParams, Intl });
-const { deduplicateNewsArticles, buildNewsEvents, clusterNewsEvents, parseNewsState, newsHref, selectNewsEvents, newsCoverage, formatNewsTime } = loadedModule.exports;
+const { deduplicateNewsArticles, buildNewsEvents, clusterNewsEvents, parseNewsState, newsHref, selectNewsEvents, newsCoverage, formatNewsTime, newsPublisherId, newsSources } = loadedModule.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
 const AS_OF = '2026-09-30T12:00:00Z';
 const article = (id, overrides = {}) => ({ id, canonical_url: null, headline: `Synthetic story ${id}`, publisher: 'Demo Publisher', published_at: '2026-09-30T11:30:00Z', retrieved_at: AS_OF, summary: 'Synthetic scenario.', is_demo: true, syndication_key: null, duplicate_urls: [], ...overrides });
@@ -93,9 +93,26 @@ test('map grouping recognizes proximity across the dateline and never plots malf
   assert.equal(groups[0].story_count, 2);
 });
 
+test('mobile grouping accounts for rendered control width while preserving distant demo hotspots', () => {
+  const views = buildNewsEvents([
+    event('iran', Array.from({ length: 35 }, (_, i) => article(`iran-${i}`)), { location: { lat: 35.7, lon: 51.4 } }),
+    event('chile', Array.from({ length: 5 }, (_, i) => article(`chile-${i}`)), { location: { lat: -30, lon: -70 } }),
+    event('nearby-a', [article('a')], { location: { lat: 40, lon: -123 } }),
+    event('nearby-b', [article('b')], { location: { lat: 40, lon: -98 } }),
+  ], AS_OF, '24h');
+  const wide = clusterNewsEvents(views, 1, 1000);
+  const narrow = clusterNewsEvents(views, 1, 343);
+  assert.equal(wide.length, 4);
+  assert.equal(narrow.length, 3);
+  assert.equal(narrow.find(group => group.id === 'iran').story_count, 35);
+  assert.equal(narrow.find(group => group.id === 'chile').story_count, 5);
+  assert.equal(narrow.find(group => group.kind === 'cluster').events.length, 2);
+  assert.equal(clusterNewsEvents(views, 3, 343).length, 4);
+});
+
 test('coverage totals do not double count a story referenced by multiple events', () => {
   const views = buildNewsEvents([event('one', [article('shared')]), event('two', [article('shared'), article('other')])], AS_OF, '24h');
-  assert.deepEqual(plain(newsCoverage(views)), { event_count: 2, story_count: 2, publisher_count: 1 });
+  assert.deepEqual(plain(newsCoverage(views)), { event_count: 2, story_count: 2, official_report_count: 0, publisher_count: 1, news_publisher_count: 1, official_source_count: 0 });
 });
 
 test('URL state round-trips edition, window, scope, selection and text safely', () => {
@@ -112,4 +129,73 @@ test('formatted evidence times are UTC and invalid timestamps stay explicitly un
   assert.match(formatNewsTime(AS_OF), /UTC$/);
   assert.equal(formatNewsTime('not a date'), 'Not recorded');
   assert.equal(formatNewsTime(null), 'Not recorded');
+});
+
+test('official reports never inflate article counts or news publisher breadth', () => {
+  const views = buildNewsEvents([event('mixed', [
+    article('news-a', { publisher_id: 'globalvoices', publisher: 'Global Voices', is_demo: false }),
+    article('news-b', { publisher_id: 'globalvoices', publisher: 'Global Voices Online', is_demo: false }),
+    article('bulletin', { record_kind: 'official_report', publisher_id: 'gdacs', publisher: 'GDACS', is_demo: false }),
+  ], { is_demo: false, severity: 'unknown', source_alert_level: 'Red' })], AS_OF, '24h');
+  assert.equal(views[0].story_count, 2);
+  assert.equal(views[0].official_report_count, 1);
+  assert.equal(views[0].publisher_count, 2);
+  assert.equal(views[0].news_publisher_count, 1);
+  assert.equal(views[0].official_source_count, 1);
+  assert.equal(views[0].severity, 'unknown');
+  assert.equal(newsCoverage(views).official_report_count, 1);
+});
+
+test('retained publisher selection filters records before counts, timestamps and empty-event removal', () => {
+  const inputs = [event('mixed', [
+    article('news', { publisher_id: 'globalvoices', is_demo: false, published_at: '2026-09-30T11:00:00Z' }),
+    article('report', { publisher_id: 'gdacs', record_kind: 'official_report', is_demo: false, published_at: '2026-09-30T11:45:00Z' }),
+  ]), event('nasa-only', [article('nasa', { publisher_id: 'nasa', is_demo: false })])];
+  const views = buildNewsEvents(inputs, AS_OF, '24h', 'globalvoices');
+  assert.equal(views.length, 1);
+  assert.deepEqual(plain(views[0].articles.map(item => item.id)), ['news']);
+  assert.equal(views[0].story_count, 1);
+  assert.equal(views[0].official_report_count, 0);
+  assert.equal(views[0].freshest_published_at, '2026-09-30T11:00:00Z');
+  assert.equal(buildNewsEvents(inputs, AS_OF, 'all', 'missing').length, 0);
+});
+
+test('spatial groups retain separate article and official-report totals', () => {
+  const views = buildNewsEvents([
+    event('news', [article('a')]),
+    event('report', [article('b', { record_kind: 'official_report', source_window_start: '2026-09-01T00:00:00Z', source_window_end: '2026-09-02T00:00:00Z' })]),
+  ], AS_OF, '24h');
+  const group = clusterNewsEvents(views, 1)[0];
+  assert.equal(group.events.length, 2);
+  assert.equal(group.story_count, 1);
+  assert.equal(group.official_report_count, 1);
+  assert.equal(views[1].official_report_count, 1, 'source coverage windows do not replace RSS publication dates');
+});
+
+test('publisher selection round-trips without becoming a URL destination', () => {
+  const state = parseNewsState(new URLSearchParams('publisher=globalvoices&window=7d&scope=unlocated&selected=story'));
+  assert.equal(state.publisherId, 'globalvoices');
+  const href = newsHref(state, 'snapshot');
+  assert.deepEqual(plain(parseNewsState(new URLSearchParams(href.split('?')[1]))), plain(state));
+  assert.equal(parseNewsState(new URLSearchParams()).publisherId, null);
+  assert.ok(newsHref({ ...state, publisherId: 'https://example.invalid/' }, 'snapshot').startsWith('/?edition=snapshot'));
+});
+
+test('legacy demo publisher labels remain distinct and real stable publisher IDs take precedence', () => {
+  assert.equal(newsPublisherId(article('nasa', { is_demo: false, publisher: ' NASA ' })), 'nasa');
+  assert.equal(newsPublisherId(article('stable', { is_demo: false, publisher: 'A changed display name', publisher_id: 'globalvoices' })), 'globalvoices');
+  const views = buildNewsEvents([event('demo', [article('a', { publisher: 'DEMO A', publisher_id: 'demo' }), article('b', { publisher: 'DEMO B', publisher_id: 'demo' })])], AS_OF, '24h');
+  assert.equal(views[0].publisher_count, 2);
+});
+
+test('per-source health stays independent of aggregate snapshot success', () => {
+  const sources = [
+    { source_id: 'globalvoices', publisher_id: 'globalvoices', name: 'Global Voices', state: 'ok', last_success_at: AS_OF },
+    { source_id: 'gdacs', publisher_id: 'gdacs', name: 'GDACS', state: 'error', last_success_at: '2026-09-28T12:00:00Z' },
+  ];
+  assert.deepEqual(plain(newsSources({ edition: 'snapshot', fetched_at: AS_OF, fetch_state: 'partial', sources })), sources);
+  assert.deepEqual(plain(newsSources({ edition: 'demo', sources: [] })), []);
+  const legacy = newsSources({ edition: 'snapshot', events: [], fetched_at: AS_OF, last_attempt_at: AS_OF, fetch_state: 'ok', error: null, source_note: 'Legacy NASA cache' });
+  assert.equal(legacy[0].source_id, 'nasa');
+  assert.equal(legacy[0].last_success_at, AS_OF);
 });

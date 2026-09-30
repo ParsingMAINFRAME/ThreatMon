@@ -49,7 +49,7 @@ export function getThreat(id: string): Promise<ThreatDetailResponse> {
   return requestJson<ThreatDetailResponse>(`/threats/${encodeURIComponent(id)}`);
 }
 
-export function getNews(edition: "demo" | "snapshot" = "demo"): Promise<NewsResponse> {
+export function getNews(edition: "demo" | "snapshot" = "snapshot"): Promise<NewsResponse> {
   return requestJson<NewsResponse>(`/news?edition=${encodeURIComponent(edition)}`);
 }
 

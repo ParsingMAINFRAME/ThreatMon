@@ -1,4 +1,4 @@
-import type { NewsArticle, NewsEvent, NewsEventView, NewsMapGroup, NewsViewState, NewsWindow } from "./news-types";
+import type { NewsArticle, NewsEvent, NewsEventView, NewsMapGroup, NewsResponse, NewsSourceStatus, NewsViewState, NewsWindow } from "./news-types";
 
 const WINDOW_HOURS: Record<NewsWindow, number> = { "1h": 1, "24h": 24, "7d": 168, all: Infinity };
 
@@ -51,8 +51,36 @@ export function deduplicateNewsArticles(articles: NewsArticle[]): NewsArticle[] 
   return articles.filter((_, index) => root(index) === index);
 }
 
+export function newsPublisherId(article: NewsArticle): string {
+  const id = article.publisher_id?.trim();
+  // Older fixtures used one generic demo ID for several explicitly fictional publishers.
+  if (id && !(article.is_demo && id === "demo")) return id;
+  const label = article.publisher.trim().toLowerCase();
+  return !article.is_demo && label === "nasa" ? "nasa" : `publisher:${label}`;
+}
+
 function publisherCount(articles: NewsArticle[]): number {
-  return new Set(articles.map((article) => article.publisher.trim().toLowerCase()).filter(Boolean)).size;
+  return new Set(articles.map(newsPublisherId)).size;
+}
+
+function recordCounts(articles: NewsArticle[]) {
+  const stories = articles.filter((article) => article.record_kind !== "official_report");
+  const reports = articles.filter((article) => article.record_kind === "official_report");
+  return { story_count: stories.length, official_report_count: reports.length, publisher_count: publisherCount(articles), news_publisher_count: publisherCount(stories), official_source_count: publisherCount(reports) };
+}
+
+/** Older NASA-only snapshots remain readable; new responses retain independent source health. */
+export function newsSources(data: NewsResponse): NewsSourceStatus[] {
+  if (data.edition === "demo") return [];
+  if (data.sources?.length) return data.sources;
+  return [{
+    source_id: "nasa", publisher_id: "nasa", name: "NASA", kind: "news",
+    feed_url: "https://www.nasa.gov/feed/", terms_url: "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    attribution: "NASA; no endorsement implied.", coverage_note: data.source_note,
+    last_attempt_at: data.last_attempt_at, last_success_at: data.fetched_at,
+    state: data.fetch_state === "ok" ? "ok" : data.fetch_state === "error" || data.fetch_state === "partial" ? "error" : "never_fetched",
+    error: data.error, item_count: data.events.length, next_fetch_at: null,
+  }];
 }
 
 function latest(articles: NewsArticle[], key: "published_at" | "retrieved_at"): string | null {
@@ -63,17 +91,17 @@ function latest(articles: NewsArticle[], key: "published_at" | "retrieved_at"): 
 }
 
 /** Publication windows are anchored to the supplied edition clock, never the browser clock. */
-export function buildNewsEvents(events: NewsEvent[], asOf: string, window: NewsWindow): NewsEventView[] {
+export function buildNewsEvents(events: NewsEvent[], asOf: string, window: NewsWindow, publisherId: string | null = null): NewsEventView[] {
   const end = timestamp(asOf);
   if (end === null) return [];
   const start = end - WINDOW_HOURS[window] * 3_600_000;
   return events.flatMap((event) => {
     const articles = deduplicateNewsArticles(event.articles.filter((article) => {
       const published = timestamp(article.published_at);
-      return published !== null && published >= start && published <= end;
+      return published !== null && published >= start && published <= end && (!publisherId || newsPublisherId(article) === publisherId);
     })).sort((a, b) => (timestamp(b.published_at) ?? 0) - (timestamp(a.published_at) ?? 0) || a.id.localeCompare(b.id));
     if (!articles.length) return [];
-    return [{ ...event, articles, story_count: articles.length, publisher_count: publisherCount(articles), freshest_published_at: latest(articles, "published_at"), last_retrieved_at: latest(articles, "retrieved_at") }];
+    return [{ ...event, articles, ...recordCounts(articles), freshest_published_at: latest(articles, "published_at"), last_retrieved_at: latest(articles, "retrieved_at") }];
   });
 }
 
@@ -83,9 +111,9 @@ export function selectNewsEvents(events: NewsEventView[], state: Pick<NewsViewSt
     && (!query || `${event.title} ${event.summary} ${event.category} ${event.location?.label ?? ""} ${event.articles.map((article) => `${article.headline} ${article.publisher}`).join(" ")}`.toLowerCase().includes(query)));
 }
 
-export function newsCoverage(events: NewsEventView[]): { event_count: number; story_count: number; publisher_count: number } {
+export function newsCoverage(events: NewsEventView[]) {
   const articles = deduplicateNewsArticles(events.flatMap((event) => event.articles));
-  return { event_count: events.length, story_count: articles.length, publisher_count: publisherCount(articles) };
+  return { event_count: events.length, ...recordCounts(articles) };
 }
 
 export function hasNewsLocation(event: NewsEvent): boolean {
@@ -95,7 +123,7 @@ export function hasNewsLocation(event: NewsEvent): boolean {
 }
 
 /** Screen-space proximity groups events for navigation; it never merges incident evidence. */
-export function clusterNewsEvents(events: NewsEventView[], zoom: number): NewsMapGroup[] {
+export function clusterNewsEvents(events: NewsEventView[], zoom: number, viewportWidth = 1000): NewsMapGroup[] {
   const located = events.filter(hasNewsLocation);
   const parents = located.map((_, index) => index);
   const root = (index: number): number => {
@@ -103,7 +131,9 @@ export function clusterNewsEvents(events: NewsEventView[], zoom: number): NewsMa
     return index;
   };
   if (zoom < 3) {
-    const distance = 42 / Math.max(1, zoom);
+    // Preserve room for 44–56px controls on a small viewport without merging incident identities.
+    const width = Number.isFinite(viewportWidth) && viewportWidth > 0 ? viewportWidth : 1000;
+    const distance = Math.max(42, 64 / width * 1000) / Math.max(1, zoom);
     for (let a = 0; a < located.length; a++) {
       const first = located[a].location!;
       for (let b = a + 1; b < located.length; b++) {
@@ -128,6 +158,7 @@ export function clusterNewsEvents(events: NewsEventView[], zoom: number): NewsMa
       lat: ordered.reduce((sum, event) => sum + event.location!.lat, 0) / ordered.length,
       lon,
       story_count: newsCoverage(ordered).story_count,
+      official_report_count: newsCoverage(ordered).official_report_count,
     };
   });
 }
@@ -140,6 +171,7 @@ export function parseNewsState(params: Pick<URLSearchParams, "get">): NewsViewSt
     scope: ["all", "located", "global", "unlocated"].includes(scope) ? scope as NewsViewState["scope"] : "all",
     query: (params.get("q") ?? "").slice(0, 200),
     selectedId: params.get("selected")?.slice(0, 256) || null,
+    publisherId: params.get("publisher")?.trim().slice(0, 160) || null,
   };
 }
 
@@ -149,6 +181,7 @@ export function newsHref(state: NewsViewState, edition: "demo" | "snapshot"): st
   if (state.scope !== "all") params.set("scope", state.scope);
   if (state.query) params.set("q", state.query);
   if (state.selectedId) params.set("selected", state.selectedId);
+  if (state.publisherId) params.set("publisher", state.publisherId);
   return `/?${params.toString()}`;
 }
 

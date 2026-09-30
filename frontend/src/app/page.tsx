@@ -13,7 +13,7 @@ async function loadNews(edition: "demo" | "snapshot"): Promise<NewsResponse | nu
 
 export default async function NewsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
-  const edition = params.edition === "snapshot" ? "snapshot" : "demo";
+  const edition = params.edition === "demo" ? "demo" : "snapshot";
   const data = await loadNews(edition);
   const mode = data ? data.edition === "demo" ? "demo" : data.events.length ? "live" : "empty" : "unavailable";
   return (

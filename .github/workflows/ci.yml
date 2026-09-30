@@ -58,7 +58,15 @@ jobs:
           assert news['edition'] == 'demo' and news['events'], news
           assert all(event['is_demo'] for event in news['events'])
           assert any(len(event['articles']) == 35 for event in news['events'])
+          with urlopen('http://localhost:8000/news') as response:
+              snapshot = json.load(response)
+          assert snapshot['edition'] == 'snapshot' and not snapshot['events'], snapshot
+          assert all(source['state'] == 'never_fetched' for source in snapshot['sources'])
           with urlopen('http://localhost:3000/') as response:
+              html = response.read().decode().lower()
+              assert 'iran reported explosion exercise' not in html
+              assert 'global voices' in html and 'gdacs' in html
+          with urlopen('http://localhost:3000/?edition=demo') as response:
               assert response.status == 200
               html = response.read().decode().lower()
               assert 'synthetic' in html and 'news' in html

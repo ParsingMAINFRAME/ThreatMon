@@ -45,8 +45,24 @@ function coordinates(event: LocatedEvent): string {
   return `${Math.abs(lat).toFixed(digits)}° ${lat < 0 ? "S" : "N"} · ${Math.abs(lon).toFixed(digits)}° ${lon < 0 ? "W" : "E"}`;
 }
 
-function storyLabel(count: number): string {
-  return `${count} ${count === 1 ? "story" : "stories"}`;
+type CoverageCounts = { story_count: number; official_report_count?: number };
+
+function articleLabel(count: number): string {
+  return `${count} ${count === 1 ? "article" : "articles"}`;
+}
+
+function reportLabel(count: number): string {
+  return `${count} official ${count === 1 ? "report" : "reports"}`;
+}
+
+function officialReportCount(coverage: CoverageCounts): number {
+  return coverage.official_report_count ?? 0;
+}
+
+function coverageLabel(coverage: CoverageCounts): string {
+  const reports = officialReportCount(coverage);
+  return [coverage.story_count > 0 ? articleLabel(coverage.story_count) : null, reports > 0 ? reportLabel(reports) : null]
+    .filter(Boolean).join(" · ") || "0 articles";
 }
 
 function boundView(view: MapView): MapView {
@@ -70,6 +86,8 @@ export function NewsMap({ events, selectedId, onSelect }: {
   const [storedView, setView] = useState<MapView>({ zoom: 1, panX: 0, panY: 0, selectionId: selectedId });
   const [clusterId, setClusterId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(WORLD_WIDTH);
+  const mapViewport = useRef<HTMLDivElement | null>(null);
   const drag = useRef<MapDrag | null>(null);
   const chooserHeading = useRef<HTMLHeadingElement | null>(null);
   const clusterTrigger = useRef<HTMLButtonElement | null>(null);
@@ -80,11 +98,22 @@ export function NewsMap({ events, selectedId, onSelect }: {
   // Remember the current selection so returning to an earlier event cannot reuse an old pan.
   if (storedView.selectionId !== selectedId) setView(view);
   const zoom = storedView.zoom;
-  const markers = useMemo(() => clusterNewsEvents(located, zoom), [located, zoom]);
+  const markers = useMemo(() => clusterNewsEvents(located, zoom, viewportWidth), [located, zoom, viewportWidth]);
   const activeCluster = markers.find((marker) => marker.kind === "cluster" && marker.id === clusterId);
   const activeClusterId = activeCluster?.id;
   const panLimit = (view.zoom - 1) * 50;
   const demoCount = located.filter(isIllustrative).length;
+  const hasMappedEvents = located.length > 0;
+
+  useEffect(() => {
+    const element = mapViewport.current;
+    if (!element || !hasMappedEvents) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width > 0) setViewportWidth(Math.round(entry.contentRect.width));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasMappedEvents]);
 
   useEffect(() => {
     if (activeClusterId) chooserHeading.current?.focus({ preventScroll: false });
@@ -180,11 +209,11 @@ export function NewsMap({ events, selectedId, onSelect }: {
           <button type="button" onClick={() => panBy(0, -15)} disabled={view.panY <= -panLimit} aria-label="Pan south">↓</button>
           <button type="button" onClick={() => panBy(-15, 0)} disabled={view.panX <= -panLimit} aria-label="Pan east">→</button>
           <span>Drag to pan</span>
-        </div> : <span className="news-map-toolbar-note">Select a circle to explore the coverage.</span>}
+        </div> : <span className="news-map-toolbar-note">Select a marker to explore the coverage.</span>}
       </div>
 
-      <p id={`${id}-help`} className="sr-only">Event circles show story counts, not severity scores. Markers labeled events group nearby, separate events. Select a group to choose an event. Use the zoom and pan controls, or focus the map and use plus, minus, Home, and arrow keys. The expandable located event index provides equivalent selection controls.</p>
-      <div className={`news-map-chart${view.zoom > 1 ? " is-zoomed" : ""}${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="World news event map" aria-describedby={`${id}-help`} onKeyDown={handleMapKey} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
+      <p id={`${id}-help`} className="sr-only">Event circles show article counts. Square markers show official report counts for events with no news articles. Events with both show articles in the circle and official reports in a separate caption. Counts are not severity scores. Markers labeled events group nearby, separate events and list article and official report counts separately. Select a group to choose an event. Use the zoom and pan controls, or focus the map and use plus, minus, Home, and arrow keys. The expandable located event index provides equivalent selection controls.</p>
+      <div ref={mapViewport} className={`news-map-chart${view.zoom > 1 ? " is-zoomed" : ""}${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="World news event map" aria-describedby={`${id}-help`} onKeyDown={handleMapKey} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
         <div className="news-map-plane" style={{ transform: `translate(${view.panX}%, ${view.panY}%) scale(${view.zoom})` }}>
           <svg className="news-map-svg" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
             <defs>
@@ -213,24 +242,29 @@ export function NewsMap({ events, selectedId, onSelect }: {
               const chosen = marker.events.some((event) => event.id === selectedId);
               const includesDemo = marker.events.some((event) => hasLocation(event) && isIllustrative(event));
               const onlyDemo = marker.events.every((event) => hasLocation(event) && isIllustrative(event));
+              const screenX = 50 + view.panX + (point.x / WORLD_WIDTH * 100 - 50) * view.zoom;
+              const screenY = 50 + view.panY + (point.y / WORLD_HEIGHT * 100 - 50) * view.zoom;
+              const labelPosition = `${screenX > 65 ? " is-label-west" : screenX < 35 ? " is-label-east" : ""}${screenY > 60 ? " is-label-above" : ""}`;
               const style: CSSProperties = { left: `${point.x / WORLD_WIDTH * 100}%`, top: `${point.y / WORLD_HEIGHT * 100}%`, transform: `translate(-50%, -50%) scale(${1 / view.zoom})` };
-              if (marker.kind === "cluster") return <button key={marker.id} type="button" className={`news-map-marker news-map-cluster${chosen ? " is-selected" : ""}${onlyDemo ? " is-demo" : ""}`} style={style} aria-expanded={activeCluster?.id === marker.id} aria-controls={activeCluster?.id === marker.id ? `${id}-chooser` : undefined} aria-label={`${marker.events.length} separate nearby events, ${storyLabel(marker.story_count)} in total. ${includesDemo ? "Includes DEMO events. " : ""}Open event chooser.`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => {
+              if (marker.kind === "cluster") return <button key={marker.id} type="button" className={`news-map-marker news-map-cluster${chosen ? " is-selected" : ""}${onlyDemo ? " is-demo" : ""}${labelPosition}`} style={{ ...style, transformOrigin: "0 0", transform: `scale(${1 / view.zoom}) translate(-${screenX > 90 ? 100 : screenX < 10 ? 0 : 50}%, -${screenY < 15 ? 0 : screenY > 85 ? 100 : 50}%)` }} aria-expanded={activeCluster?.id === marker.id} aria-controls={activeCluster?.id === marker.id ? `${id}-chooser` : undefined} aria-label={`${marker.events.length} separate nearby events, ${coverageLabel(marker)} in total. ${includesDemo ? "Includes DEMO events. " : ""}Open event chooser.`} title={`${marker.events.length} separate nearby events · ${coverageLabel(marker)}${includesDemo ? " · Includes DEMO events" : ""}`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => {
                 stopDrag();
                 clusterTrigger.current = event.currentTarget;
                 setClusterId(marker.id);
               }}>
-                <strong>{marker.events.length} events</strong>
-                <span>{storyLabel(marker.story_count)}</span>
-                {includesDemo ? <span className="news-map-marker-origin">DEMO{onlyDemo ? "" : " included"}</span> : null}
+                <strong>{marker.events.length}</strong><span>events</span>
+                <span className="news-map-marker-caption" aria-hidden="true">{coverageLabel(marker)}{includesDemo ? <span className="news-map-marker-origin">DEMO{onlyDemo ? "" : " included"}</span> : null}</span>
               </button>;
               const event = marker.events[0];
               if (!event || !hasLocation(event)) return null;
               const severity = SEVERITY_LABELS[event.severity];
-              const markerSize = Math.round(44 + Math.min(24, Math.sqrt(event.story_count) * 3));
-              return <button key={marker.id} type="button" className={`news-map-marker severity-${event.severity}${chosen ? " is-selected" : ""}${isIllustrative(event) ? " is-demo" : ""}${event.location.lat < -15 ? " is-southern" : ""}`} style={{ ...style, "--news-marker-size": `${markerSize}px` } as CSSProperties} aria-pressed={chosen} aria-label={`${event.title}. ${storyLabel(event.story_count)}. ${severity}. Status: ${event.status}. ${locationDescription(event)}: ${event.location.label}. Select event.`} title={`${event.title} · ${storyLabel(event.story_count)} · ${severity} · ${locationDescription(event)}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => selectEvent(event)}>
-                <span className="news-map-marker-count" aria-hidden="true">{event.story_count}</span>
-                <span className="news-map-marker-caption" aria-hidden="true"><span className="news-map-caption-volume">{event.story_count === 1 ? "story" : "stories"} · </span>{event.severity === "unknown" ? "Severity unknown" : `${event.severity} severity`}{isIllustrative(event) ? <span className="news-map-inline-demo"> · DEMO</span> : null}</span>
-                {isIllustrative(event) ? <span className="news-map-marker-origin" aria-hidden="true">DEMO</span> : event.location.precision === "approximate_area" ? <span className="news-map-marker-origin" aria-hidden="true">Approximate area</span> : null}
+              const reportCount = officialReportCount(event);
+              const officialOnly = event.story_count === 0 && reportCount > 0;
+              const mixedCoverage = event.story_count > 0 && reportCount > 0;
+              const markerCount = officialOnly ? reportCount : event.story_count;
+              const markerSize = Math.round(44 + Math.min(24, Math.sqrt(markerCount) * 3));
+              return <button key={marker.id} type="button" className={`news-map-marker severity-${event.severity}${officialOnly ? " is-official-report" : ""}${mixedCoverage ? " has-mixed-coverage" : ""}${chosen ? " is-selected" : ""}${isIllustrative(event) ? " is-demo" : ""}${labelPosition}`} style={{ ...style, "--news-marker-size": `${markerSize}px` } as CSSProperties} aria-pressed={chosen} aria-label={`${event.title}. ${coverageLabel(event)}. ${severity}. Status: ${event.status}. ${locationDescription(event)}: ${event.location.label}. Select event.`} title={`${event.title} · ${coverageLabel(event)} · ${severity} · ${locationDescription(event)}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => selectEvent(event)}>
+                <span className="news-map-marker-count" aria-hidden="true">{markerCount}</span>
+                <span className="news-map-marker-caption" aria-hidden="true"><span className={officialOnly || mixedCoverage ? "news-map-caption-kind" : "news-map-caption-volume"}>{officialOnly ? `official ${reportCount === 1 ? "report" : "reports"}` : event.story_count === 1 ? "article" : "articles"} · </span>{event.severity === "unknown" ? "Severity unknown" : `${event.severity} severity`}{mixedCoverage ? <span className="news-map-caption-reports">+ {reportLabel(reportCount)}</span> : null}{isIllustrative(event) ? <span className="news-map-marker-origin">DEMO</span> : event.location.precision === "approximate_area" ? <span className="news-map-marker-origin">Approximate area</span> : null}</span>
               </button>;
             })}
           </div>
@@ -239,14 +273,14 @@ export function NewsMap({ events, selectedId, onSelect }: {
 
       {activeCluster ? <section id={`${id}-chooser`} className="news-map-chooser" aria-labelledby={`${id}-chooser-title`} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeChooser(); } }}>
         <div className="news-map-chooser-heading">
-          <h3 id={`${id}-chooser-title`} ref={chooserHeading} tabIndex={-1}>{activeCluster.events.length} nearby events · {storyLabel(activeCluster.story_count)}</h3>
+          <h3 id={`${id}-chooser-title`} ref={chooserHeading} tabIndex={-1}>{activeCluster.events.length} separate nearby events · {coverageLabel(activeCluster)}</h3>
           <button type="button" onClick={closeChooser}>Close chooser</button>
         </div>
-        <p>These are separate events grouped for map readability. Their stories have not been combined into one incident.</p>
+        <p>These are separate events grouped for map readability. Their articles and official reports have not been combined into one incident.</p>
         <div className="news-map-chooser-list">
           {activeCluster.events.filter(hasLocation).map((event) => <button type="button" key={event.id} onClick={() => selectEvent(event)} aria-pressed={selectedId === event.id}>
             <strong>{event.title}</strong>
-            <span>{storyLabel(event.story_count)} · {SEVERITY_LABELS[event.severity]} · {event.status}</span>
+            <span>{coverageLabel(event)} · {SEVERITY_LABELS[event.severity]} · {event.status}</span>
             <span>{event.location.label} · {locationDescription(event)}</span>
           </button>)}
         </div>
@@ -255,16 +289,19 @@ export function NewsMap({ events, selectedId, onSelect }: {
       <div className="news-map-status" aria-live="polite" aria-atomic="true">
         {selected ? <>
           <strong>{selected.title}</strong>
+          <span>{coverageLabel(selected)} · {SEVERITY_LABELS[selected.severity]}</span>
           <span>{selected.location.label} · {coordinates(selected)} · {locationDescription(selected)}</span>
           <span>Location confidence: {selected.location.confidence}. {selected.location.basis}</span>
-        </> : <span>Select an event to view its stories. Locations are reference points, not impact areas.</span>}
+        </> : <span>Select an event to view its articles and official reports. Locations are reference points, not impact areas.</span>}
       </div>
       <div className="news-map-legend" aria-label="Map legend">
-        <span>Circle number = stories in this view.</span>
-        <span>“N events” = separate nearby events.</span>
+        <span>Circle number = news articles in this view.</span>
+        <span>Square number = official reports where no news articles are available.</span>
+        <span>Mixed coverage keeps official report counts in a separate caption.</span>
+        <span>“N events” = separate nearby events. Select the group to inspect each event and its coverage.</span>
         <span>Severity: <i className="severity-high" aria-hidden="true" /> high · <i className="severity-moderate" aria-hidden="true" /> moderate · <i className="severity-low" aria-hidden="true" /> low · <i className="severity-unknown" aria-hidden="true" /> unknown.</span>
         {demoCount ? <span>DEMO labels identify illustrative locations ({demoCount}).</span> : null}
-        <span>Story volume does not establish severity or corroboration.</span>
+        <span>Article and report volume does not establish severity or corroboration.</span>
         <a href={BASEMAP.terms} target="_blank" rel="noreferrer">Natural Earth map data <span className="sr-only">(opens in a new tab)</span></a>
       </div>
 
@@ -273,7 +310,7 @@ export function NewsMap({ events, selectedId, onSelect }: {
         <div className="news-map-index-list" aria-label="Located events, including overlapping points">
           {located.map((event) => <button key={event.id} type="button" onClick={() => selectEvent(event)} aria-pressed={selectedId === event.id} className={selectedId === event.id ? "is-selected" : undefined}>
             <strong>{event.title}</strong>
-            <span>{storyLabel(event.story_count)} · {SEVERITY_LABELS[event.severity]}</span>
+            <span>{coverageLabel(event)} · {SEVERITY_LABELS[event.severity]}</span>
             <span>{event.location.label} · {locationDescription(event)}</span>
           </button>)}
         </div>

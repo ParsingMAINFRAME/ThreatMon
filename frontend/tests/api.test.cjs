@@ -61,7 +61,7 @@ test('preserves HTTP failures and encodes detail record identifiers', async () =
 
 test('news editions use an explicit endpoint and do not silently substitute demo data', async () => {
   const api = apiFor([{ edition: 'snapshot', events: [] }, { status: 503 }]);
-  const data = await api.getNews('snapshot');
+  const data = await api.getNews();
   assert.equal(data.edition, 'snapshot');
   assert.equal(api.requests[0], 'http://test-api/news?edition=snapshot');
   await assert.rejects(api.getNews('demo'), /HTTP 503/);

@@ -9,6 +9,8 @@ const modeLabels: Record<DataMode, string> = {
 };
 
 export function ConsoleShell({ children, mode, detail = false, section = "signals" }: { children: ReactNode; mode: DataMode; detail?: boolean; section?: "news" | "signals" }) {
+  const editionLabel = section === "news" && mode === "live" ? "Stored coverage"
+    : section === "news" && mode === "empty" ? "No coverage loaded" : modeLabels[mode];
   return (
     <div className="desk-shell">
       <a href="#main-content" className="skip-link">Skip to content</a>
@@ -18,7 +20,7 @@ export function ConsoleShell({ children, mode, detail = false, section = "signal
           <p>PUBLIC SOURCE OBSERVATORY</p>
         </div>
         <div className="masthead-tools">
-          <span className={`edition-label edition-${mode}`}><span aria-hidden="true" className="edition-dot" />{modeLabels[mode]}</span>
+          <span className={`edition-label edition-${mode}`}><span aria-hidden="true" className="edition-dot" />{editionLabel}</span>
           <RefreshButton />
         </div>
       </header>

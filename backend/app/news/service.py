@@ -1,6 +1,7 @@
-"""A single fixed public RSS source with bounded fetches and an atomic local JSON cache."""
+"""Fixed public RSS sources, each with bounded fetches and an independent atomic JSON cache."""
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 import hashlib
@@ -16,10 +17,12 @@ import httpx
 from pydantic import AwareDatetime, Field, ValidationError, field_validator
 
 from app.core.time import utc_now
-from app.news.models import NewsArticle, NewsEvent, NewsModel, NewsResponse
+from app.news.models import NewsArticle, NewsEvent, NewsModel, NewsResponse, NewsSourceStatus
 from app.news.urls import ArticleCandidate, canonical_url, deduplicate_articles
 
 NASA_FEED_URL = "https://www.nasa.gov/feed/"
+GLOBALVOICES_FEED_URL = "https://globalvoices.org/feed/"
+GDACS_FEED_URL = "https://www.gdacs.org/xml/rss.xml"
 MAX_FEED_BYTES = 1024 * 1024
 MAX_CACHE_BYTES = 2 * 1024 * 1024
 MAX_ITEMS = 10
@@ -28,6 +31,35 @@ SOURCE_NOTE = ("NASA RSS article metadata, attributed to NASA; no endorsement is
                "reported publication with unknown incident severity and no inferred map coordinates. This is an operator-fetched "
                "snapshot, not continuous monitoring. fetched_at records the last successful retrieval or HTTP revalidation; "
                "article retrieved_at preserves body retrieval time. Time windows use the response as_of clock.")
+
+
+@dataclass(frozen=True)
+class SourceConfig:
+    name: str
+    kind: str
+    feed_url: str
+    terms_url: str
+    attribution: str
+    coverage_note: str
+    cooldown: int
+
+
+SOURCES = {
+    "globalvoices": SourceConfig("Global Voices", "news", GLOBALVOICES_FEED_URL,
+        "https://globalvoices.org/about/global-voices-attribution-policy/",
+        "Global Voices and each named author; CC BY 3.0. Headlines and attribution only; no endorsement implied.",
+        "At most 20 independent publisher articles. Publication is not independent verification; no inferred incident grouping or coordinates.", 900),
+    "gdacs": SourceConfig("GDACS", "official", GDACS_FEED_URL, "https://www.gdacs.org/About/termofuse.aspx",
+        "GDACS / European Commission and United Nations. EU-owned content follows the linked Commission reuse policy; third-party rights remain separate. Metadata normalized; no endorsement implied.",
+        "Only the latest 30 source events from available feed records are retained; this is not complete disaster coverage. Event IDs group revisions only. Source alert levels model potential humanitarian impact; reference points are approximate, and source date windows may include forecasts. Not population warnings.", 900),
+    "nasa": SourceConfig("NASA", "news", NASA_FEED_URL, "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+        "NASA article metadata; no endorsement implied.", SOURCE_NOTE, 300),
+}
+AGGREGATE_NOTE = ("Operator-fetched metadata from Global Voices, GDACS and NASA; no automatic polling or completeness guarantee. "
+                  "fetched_at is the latest successful retrieval or revalidation of ANY source; inspect each source's own status and clock. "
+                  "Publication dates are feed-record publication times, not incident occurrence times. Article retrieved_at remains the last body retrieval. "
+                  "Source windows are source-provided periods, possibly forecasts. Time filters use the response as_of clock. "
+                  "No article text, images, inferred geocoding, or cross-publisher event clustering is retained.")
 
 
 class NewsError(ValueError):
@@ -75,9 +107,9 @@ def _plain_text(value: str, limit: int) -> str:
     return " ".join(" ".join(parser.parts).split())[:limit]
 
 
-def parse_nasa_feed(body: bytes, *, retrieved_at: datetime) -> tuple[list[NewsEvent], int]:
+def _rss_items(body: bytes) -> list[ElementTree.Element]:
     if len(body) > MAX_FEED_BYTES:
-        raise NewsError("NASA feed exceeds the 1 MiB limit")
+        raise NewsError("RSS feed exceeds the 1 MiB limit")
     try:
         # Decode before checking declarations. UTF-16/32 and NUL-containing XML cannot bypass the check.
         xml = body.decode("utf-8-sig")
@@ -85,12 +117,17 @@ def parse_nasa_feed(body: bytes, *, retrieved_at: datetime) -> tuple[list[NewsEv
             raise NewsError("XML document types and entities are not accepted")
         document = ElementTree.fromstring(xml)
     except (UnicodeDecodeError, ElementTree.ParseError) as error:
-        raise NewsError("NASA feed is not valid UTF-8 RSS XML") from error
+        raise NewsError("Feed is not valid UTF-8 RSS XML") from error
     if document.tag != "rss" or document.find("channel") is None:
-        raise NewsError("NASA feed must be an RSS channel")
-    items = document.findall("./channel/item")[:MAX_ITEMS]
+        raise NewsError("Feed must be an RSS channel")
+    items = document.findall("./channel/item")
     if not items:
-        raise NewsError("NASA feed contains no usable articles")
+        raise NewsError("Feed contains no usable records")
+    return items
+
+
+def parse_nasa_feed(body: bytes, *, retrieved_at: datetime) -> tuple[list[NewsEvent], int]:
+    items = _rss_items(body)[:MAX_ITEMS]
     candidates = []
     for item in items:
         try:
@@ -102,7 +139,7 @@ def parse_nasa_feed(body: bytes, *, retrieved_at: datetime) -> tuple[list[NewsEv
             if published.tzinfo is None:
                 raise NewsError("NASA article date must include a timezone")
             published = published.astimezone(UTC)
-            if published > retrieved_at + timedelta(minutes=5):
+            if published > retrieved_at:
                 raise NewsError("NASA article publication time is unexpectedly in the future")
             headline = _plain_text(item.findtext("title") or "", 500)
             if not headline:
@@ -127,21 +164,25 @@ def parse_nasa_feed(body: bytes, *, retrieved_at: datetime) -> tuple[list[NewsEv
     return events, excluded
 
 
-def _empty(now: datetime, *, error: str | None = None) -> NewsResponse:
+def _empty(now: datetime, *, error: str | None = None, source: str = "nasa") -> NewsResponse:
     return NewsResponse(edition="snapshot", as_of=now, fetched_at=None, last_attempt_at=None,
                         fetch_state="error" if error else "never_fetched", error=error,
-                        events=[], duplicates_excluded=0, source_note=SOURCE_NOTE)
+                        events=[], duplicates_excluded=0, source_note=SOURCES[source].coverage_note)
 
 
-def _load_cache(path: Path) -> NewsCache | None:
+def _load_cache(path: Path, source: str = "nasa") -> NewsCache | None:
     try:
-        with path.open("rb") as source:
-            body = source.read(MAX_CACHE_BYTES + 1)
+        with path.open("rb") as cache_file:
+            body = cache_file.read(MAX_CACHE_BYTES + 1)
         if len(body) > MAX_CACHE_BYTES:
             raise NewsError("Stored news snapshot exceeds its size limit")
         cache = NewsCache.model_validate_json(body)
         if cache.response.edition != "snapshot":
             raise NewsError("Stored news snapshot has an invalid edition")
+        if cache.response.fetch_state not in {"never_fetched", "ok", "error"} or any(
+            article.source_id != source for event in cache.response.events for article in event.articles
+        ):
+            raise NewsError("Stored news snapshot has an invalid source identity")
         return cache
     except FileNotFoundError:
         return None
@@ -149,13 +190,53 @@ def _load_cache(path: Path) -> NewsCache | None:
         raise NewsError("Stored news snapshot could not be read") from error
 
 
-def read_news(path: Path | str, *, now: datetime | None = None) -> NewsResponse:
+def source_cache_path(path: Path | str, source: str) -> Path:
+    if source not in SOURCES:
+        raise ValueError("Unknown news source")
+    path = Path(path)
+    return path if source == "nasa" else path.with_name(f"{path.stem}.{source}{path.suffix or '.json'}")
+
+
+def _with_status(response: NewsResponse, source: str, next_fetch_at: datetime | None = None) -> NewsResponse:
+    config = SOURCES[source]
+    status = NewsSourceStatus(source_id=source, publisher_id=source, name=config.name, kind=config.kind,
+                              feed_url=config.feed_url, terms_url=config.terms_url, attribution=config.attribution,
+                              coverage_note=config.coverage_note, last_attempt_at=response.last_attempt_at,
+                              last_success_at=response.fetched_at, state=response.fetch_state, error=response.error,
+                              item_count=sum(len(event.articles) for event in response.events), next_fetch_at=next_fetch_at)
+    return response.model_copy(update={"sources": [status]})
+
+
+def read_news(path: Path | str, *, now: datetime | None = None, source: str = "nasa") -> NewsResponse:
     now = now or utc_now()
+    path = source_cache_path(path, source)
     try:
-        cache = _load_cache(Path(path))
-        return cache.response.model_copy(update={"as_of": now}) if cache else _empty(now)
+        cache = _load_cache(path, source)
+        response = cache.response.model_copy(update={"as_of": now}) if cache else _empty(now, source=source)
+        return _with_status(response, source, cache.next_fetch_at if cache else None)
     except NewsError as error:
-        return _empty(now, error=str(error))
+        return _with_status(_empty(now, error=str(error), source=source), source)
+
+
+def _aggregate(responses: list[NewsResponse], now: datetime) -> NewsResponse:
+    sources = [status for response in responses for status in response.sources]
+    states = {status.state for status in sources}
+    state = "ok" if states == {"ok"} else "partial" if "ok" in states else "error" if "error" in states else "never_fetched"
+    successes = [status.last_success_at for status in sources if status.last_success_at]
+    attempts = [status.last_attempt_at for status in sources if status.last_attempt_at]
+    errors = [f"{status.name}: {status.error}" for status in sources if status.error]
+    events = [event for response in responses for event in response.events]
+    events.sort(key=lambda event: (-max(article.published_at for article in event.articles).timestamp(), event.id))
+    return NewsResponse(edition="snapshot", as_of=now, fetched_at=max(successes) if successes else None,
+                        last_attempt_at=max(attempts) if attempts else None, fetch_state=state,
+                        error="; ".join(errors)[:500] if errors else None, events=events,
+                        duplicates_excluded=sum(response.duplicates_excluded for response in responses),
+                        source_note=AGGREGATE_NOTE, sources=sources)
+
+
+def read_sources(path: Path | str, *, now: datetime | None = None) -> NewsResponse:
+    now = now or utc_now()
+    return _aggregate([read_news(path, now=now, source=source) for source in SOURCES], now)
 
 
 def _save_cache(path: Path, cache: NewsCache) -> None:
@@ -188,9 +269,9 @@ def _retry_after(value: str | None, now: datetime) -> int:
         return 0
 
 
-def _cache_seconds(headers: httpx.Headers) -> int:
+def _cache_seconds(headers: httpx.Headers, minimum: int = MIN_CACHE_SECONDS) -> int:
     match = re.search(r"(?:^|,)\s*max-age\s*=\s*(\d{1,9})(?:\s*,|\s*$)", headers.get("cache-control", ""), re.IGNORECASE)
-    return max(MIN_CACHE_SECONDS, int(match[1]) if match else 0)
+    return max(minimum, int(match[1]) if match else 0)
 
 
 def _next_fetch(now: datetime, seconds: int) -> datetime:
@@ -198,8 +279,9 @@ def _next_fetch(now: datetime, seconds: int) -> datetime:
     return now + timedelta(seconds=min(max(MIN_CACHE_SECONDS, seconds), maximum))
 
 
-async def _fetch(client: httpx.AsyncClient, cache: NewsCache | None, now: datetime) -> tuple[bytes | None, httpx.Headers]:
-    headers = {"User-Agent": "ThreatMon/0.3 (read-only NASA RSS portfolio client)", "Accept": "application/rss+xml, application/xml, text/xml"}
+async def _fetch(client: httpx.AsyncClient, cache: NewsCache | None, now: datetime, source: str = "nasa") -> tuple[bytes | None, httpx.Headers]:
+    config = SOURCES[source]
+    headers = {"User-Agent": "ThreatMon/0.3 (read-only RSS portfolio client)", "Accept": "application/rss+xml, application/xml, text/xml"}
     if cache and cache.response.fetched_at:
         if cache.etag:
             headers["If-None-Match"] = cache.etag
@@ -208,63 +290,86 @@ async def _fetch(client: httpx.AsyncClient, cache: NewsCache | None, now: dateti
     async with asyncio.timeout(45):
         for attempt in range(3):
             try:
-                async with client.stream("GET", NASA_FEED_URL, headers=headers, timeout=15, follow_redirects=False) as response:
+                async with client.stream("GET", config.feed_url, headers=headers, timeout=15, follow_redirects=False) as response:
                     if response.status_code == 304:
                         if cache is None or cache.response.fetched_at is None:
-                            raise NewsError("NASA returned an unchanged response without a cached snapshot")
+                            raise NewsError(f"{config.name} returned an unchanged response without a cached snapshot")
                         return None, response.headers
                     if response.status_code != 200:
                         retry_after = _retry_after(response.headers.get("retry-after"), now)
                         if (response.status_code >= 500 or response.status_code == 429) and attempt < 2 and not retry_after:
                             await asyncio.sleep(0.25 * 2 ** attempt)
                             continue
-                        raise NewsError(f"NASA feed returned HTTP {response.status_code}", retry_after)
+                        raise NewsError(f"{config.name} feed returned HTTP {response.status_code}", retry_after)
                     body = bytearray()
                     async for chunk in response.aiter_bytes():
                         body.extend(chunk)
                         if len(body) > MAX_FEED_BYTES:
-                            raise NewsError("NASA feed exceeds the 1 MiB limit")
+                            raise NewsError(f"{config.name} feed exceeds the 1 MiB limit")
                     return bytes(body), response.headers
             except httpx.TransportError as error:
                 if attempt < 2:
                     await asyncio.sleep(0.25 * 2 ** attempt)
                     continue
-                raise NewsError("NASA feed transport failed after bounded retries") from error
-    raise NewsError("NASA feed request failed")
+                raise NewsError(f"{config.name} feed transport failed after bounded retries") from error
+    raise NewsError(f"{config.name} feed request failed")
 
 
-async def ingest_news(path: Path | str, *, client: httpx.AsyncClient | None = None, now: datetime | None = None) -> NewsResponse:
-    path = Path(path)
+async def ingest_news(path: Path | str, *, client: httpx.AsyncClient | None = None, now: datetime | None = None,
+                      source: str = "nasa") -> NewsResponse:
+    base = Path(path)
+    path = source_cache_path(base, source)
+    config = SOURCES[source]
     now = now or utc_now()
     try:
-        cache = _load_cache(path)
+        cache = _load_cache(path, source)
     except NewsError:
         cache = None
-    previous = cache.response if cache else _empty(now)
+    previous = cache.response if cache else _empty(now, source=source)
     if cache and now < cache.next_fetch_at:
-        return previous.model_copy(update={"as_of": now})
+        return _with_status(previous.model_copy(update={"as_of": now}), source, cache.next_fetch_at)
     if client is None:
         async with httpx.AsyncClient(timeout=15, follow_redirects=False) as owned_client:
-            return await ingest_news(path, client=owned_client, now=now)
-    cache_seconds = MIN_CACHE_SECONDS
+            return await ingest_news(base, client=owned_client, now=now, source=source)
+    cache_seconds = config.cooldown
     try:
-        body, headers = await _fetch(client, cache, now)
-        events, excluded = parse_nasa_feed(body, retrieved_at=now) if body is not None else (previous.events, previous.duplicates_excluded)
+        from app.news.feeds import parse_gdacs_feed, parse_globalvoices_feed
+        parser = {"nasa": parse_nasa_feed, "globalvoices": parse_globalvoices_feed, "gdacs": parse_gdacs_feed}[source]
+        body, headers = await _fetch(client, cache, now, source)
+        events, excluded = parser(body, retrieved_at=now) if body is not None else (previous.events, previous.duplicates_excluded)
         result = NewsResponse(edition="snapshot", as_of=now, fetched_at=now, last_attempt_at=now, fetch_state="ok",
-                              error=None, events=events, duplicates_excluded=excluded, source_note=SOURCE_NOTE)
-        cache_seconds = _cache_seconds(headers)
+                              error=None, events=events, duplicates_excluded=excluded, source_note=config.coverage_note)
+        cache_seconds = _cache_seconds(headers, config.cooldown)
+        result = _with_status(result, source, _next_fetch(now, cache_seconds))
         stored = NewsCache(response=result, etag=headers.get("etag") or (cache.etag if cache and body is None else None),
                            last_modified=headers.get("last-modified") or (cache.last_modified if cache and body is None else None),
                            next_fetch_at=_next_fetch(now, cache_seconds))
     except (NewsError, TimeoutError, ValidationError, httpx.HTTPError) as error:
-        message = str(error) if isinstance(error, NewsError) else "NASA news retrieval failed; retained snapshot preserved"
-        cache_seconds = max(MIN_CACHE_SECONDS, getattr(error, "retry_after", 0))
+        message = str(error) if isinstance(error, NewsError) else f"{config.name} retrieval failed; retained snapshot preserved"
+        cache_seconds = max(config.cooldown, getattr(error, "retry_after", 0))
         result = previous.model_copy(update={"as_of": now, "last_attempt_at": now, "fetch_state": "error", "error": message[:500]})
+        result = _with_status(result, source, _next_fetch(now, cache_seconds))
         stored = NewsCache(response=result, etag=cache.etag if cache else None,
                            last_modified=cache.last_modified if cache else None, next_fetch_at=_next_fetch(now, cache_seconds))
     try:
         _save_cache(path, stored)
     except (OSError, NewsError):
-        return previous.model_copy(update={"as_of": now, "last_attempt_at": now, "fetch_state": "error",
-                                           "error": "Could not save news cache; previous disk snapshot remains unchanged"})
+        return _with_status(previous.model_copy(update={"as_of": now, "last_attempt_at": now, "fetch_state": "error",
+                                           "error": "Could not save news cache; previous disk snapshot remains unchanged"}),
+                            source, cache.next_fetch_at if cache else None)
     return result
+
+
+async def ingest_sources(path: Path | str, *, source: str = "all", client: httpx.AsyncClient | None = None,
+                         now: datetime | None = None) -> NewsResponse:
+    if source != "all" and source not in SOURCES:
+        raise ValueError("Unknown news source")
+    now = now or utc_now()
+    selected = list(SOURCES) if source == "all" else [source]
+    if client is None:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as owned_client:
+            return await ingest_sources(path, source=source, client=owned_client, now=now)
+    # Different source paths and cooldowns make the three bounded operations independent.
+    fetched = await asyncio.gather(*(ingest_news(path, source=name, client=client, now=now) for name in selected))
+    responses = dict(zip(selected, fetched))
+    return _aggregate([responses[name] if name in responses else read_news(path, source=name, now=now) for name in SOURCES], now)

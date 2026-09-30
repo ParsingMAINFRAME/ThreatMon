@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import re
 from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -15,6 +16,13 @@ class NewsLocation(NewsModel):
     precision: Literal["source_point", "approximate_area", "illustrative"]
     confidence: Literal["high", "medium", "low", "unknown"]
     basis: str = Field(min_length=1, max_length=1000)
+    source_url: str | None = None
+
+    @field_validator("source_url")
+    @classmethod
+    def safe_source_url(cls, value: str | None) -> str | None:
+        from app.news.urls import canonical_url
+        return canonical_url(value) if value is not None else None
 
 
 class NewsArticle(NewsModel):
@@ -28,15 +36,28 @@ class NewsArticle(NewsModel):
     is_demo: bool
     syndication_key: str | None = Field(default=None, max_length=200)
     duplicate_urls: list[str] = Field(default_factory=list, max_length=100)
+    source_id: str = Field(default="", max_length=100)
+    publisher_id: str = Field(default="", max_length=200)
+    record_kind: Literal["article", "official_report"] = "article"
+    author: str | None = Field(default=None, max_length=300)
+    license_url: str | None = None
+    source_window_start: AwareDatetime | None = None
+    source_window_end: AwareDatetime | None = None
 
-    @field_validator("published_at", "retrieved_at")
+    @field_validator("published_at", "retrieved_at", "source_window_start", "source_window_end")
     @classmethod
-    def utc_timestamp(cls, value: datetime) -> datetime:
-        return value.astimezone(UTC)
+    def utc_timestamp(cls, value: datetime | None) -> datetime | None:
+        return value.astimezone(UTC) if value is not None else None
 
     @model_validator(mode="after")
     def honest_origin_and_urls(self) -> "NewsArticle":
         from app.news.urls import canonical_url
+        if not self.source_id:
+            self.source_id = "demo" if self.is_demo else "nasa"
+        if not self.publisher_id:
+            self.publisher_id = re.sub(r"[^a-z0-9]+", "-", self.publisher.lower()).strip("-")
+        if self.license_url is not None:
+            self.license_url = canonical_url(self.license_url)
         if self.is_demo:
             if self.canonical_url is not None or self.duplicate_urls:
                 raise ValueError("Demo articles have no external URLs")
@@ -63,6 +84,8 @@ class NewsEvent(NewsModel):
     scope: Literal["located", "global", "unlocated"]
     is_demo: bool
     articles: list[NewsArticle] = Field(min_length=1, max_length=100)
+    source_event_id: str | None = Field(default=None, max_length=160)
+    source_alert_level: str | None = Field(default=None, max_length=100)
 
     @model_validator(mode="after")
     def consistent_evidence(self) -> "NewsEvent":
@@ -82,16 +105,45 @@ class NewsEvent(NewsModel):
         return self
 
 
+class NewsSourceStatus(NewsModel):
+    source_id: str = Field(min_length=1, max_length=100)
+    publisher_id: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=200)
+    kind: Literal["news", "official"]
+    feed_url: str
+    terms_url: str
+    attribution: str = Field(min_length=1, max_length=1000)
+    coverage_note: str = Field(min_length=1, max_length=2000)
+    last_attempt_at: AwareDatetime | None = None
+    last_success_at: AwareDatetime | None = None
+    state: Literal["never_fetched", "ok", "error"]
+    error: str | None = Field(default=None, max_length=500)
+    item_count: int = Field(default=0, ge=0)
+    next_fetch_at: AwareDatetime | None = None
+
+    @field_validator("last_attempt_at", "last_success_at", "next_fetch_at")
+    @classmethod
+    def utc_timestamp(cls, value: datetime | None) -> datetime | None:
+        return value.astimezone(UTC) if value is not None else None
+
+    @field_validator("feed_url", "terms_url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        from app.news.urls import canonical_url
+        return canonical_url(value)
+
+
 class NewsResponse(NewsModel):
     edition: Literal["demo", "snapshot"]
     as_of: AwareDatetime
     fetched_at: AwareDatetime | None
     last_attempt_at: AwareDatetime | None
-    fetch_state: Literal["demo", "never_fetched", "ok", "error"]
+    fetch_state: Literal["demo", "never_fetched", "ok", "error", "partial"]
     error: str | None = Field(default=None, max_length=500)
     events: list[NewsEvent] = Field(default_factory=list, max_length=100)
     duplicates_excluded: int = Field(default=0, ge=0)
     source_note: str = Field(min_length=1, max_length=2000)
+    sources: list[NewsSourceStatus] = Field(default_factory=list, max_length=10)
 
     @field_validator("as_of", "fetched_at", "last_attempt_at")
     @classmethod
@@ -113,6 +165,8 @@ class NewsResponse(NewsModel):
             raise ValueError("Successful snapshot requires a retrieval timestamp")
         if len({event.id for event in self.events}) != len(self.events):
             raise ValueError("Event identities must be unique")
+        if len({source.source_id for source in self.sources}) != len(self.sources):
+            raise ValueError("Source health identities must be unique")
         article_ids = [article.id for event in self.events for article in event.articles]
         if len(set(article_ids)) != len(article_ids):
             raise ValueError("An article cannot inflate multiple event counts")
