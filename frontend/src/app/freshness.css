@@ -1,0 +1,27 @@
+.feed-status { margin: 17px 0 0; padding: 0 0 14px; border-bottom: 1px solid var(--rule); }
+.feed-status-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.feed-status-heading h2 { margin: 0; font: 16px var(--serif); }
+.feed-status-heading p { margin: 0; color: var(--muted); font: 12px/1.5 var(--mono); }
+.feed-status-context { margin: 5px 0 11px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.feed-status-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 15px 28px; list-style: none; padding: 0; margin: 0; }
+.feed-status-item { min-width: 0; padding-left: 12px; border-left: 2px solid var(--rule); }
+.feed-status-stale { border-left-color: #896740; }
+.feed-status-name { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.feed-status-name h3 { margin: 0; font: 600 12px/1.5 var(--sans); }
+.feed-status-name > span { color: var(--muted); font: 12px/1.5 var(--mono); }
+.feed-status-name .feed-status-error { color: #8c3f30; }
+.feed-status-item dl { margin: 6px 0 0; }
+.feed-status-item dl > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 3px; font: 12px/1.5 var(--mono); }
+.feed-status-item dt { color: var(--muted); }
+.feed-status-item dd { margin: 0; }
+.feed-status-age dd { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.feed-status-age strong { color: var(--accent); font-weight: 400; }
+.feed-status-stale .feed-status-age strong,.feed-status-unknown .feed-status-age strong { color: #896740; }
+.feed-status-unavailable { margin: 10px 0; color: #896740; font-size: 12px; line-height: 1.6; }
+.feed-status-policy { margin: 11px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+@media (max-width: 850px) { .feed-status-name { align-items: start; flex-direction: column; gap: 1px; } }
+@media (max-width: 600px) {
+  .feed-status-heading { align-items: start; flex-direction: column; gap: 4px; }
+  .feed-status-list { grid-template-columns: 1fr; gap: 12px; }
+  .feed-status-name { align-items: baseline; flex-direction: row; gap: 10px; }
+}

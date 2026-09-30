@@ -1,0 +1,14 @@
+.venv
+.env
+.env.*
+__pycache__
+*.db
+*.db-shm
+*.db-wal
+*.sqlite*
+*.log
+.pytest_cache
+tests
+htmlcov
+.coverage
+.artifacts

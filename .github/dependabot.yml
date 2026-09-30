@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    groups:
+      next:
+        patterns: ["next", "eslint-config-next"]
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: monthly
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: monthly

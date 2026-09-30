@@ -1,0 +1,55 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: sqlite:////data/threat_situation_room.db
+      NEWS_SNAPSHOT_PATH: /data/news-snapshot.json
+      ALLOWED_ORIGINS: '["http://localhost:3000"]'
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - threatroom-data:/data
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build: ./frontend
+    environment:
+      API_BASE_URL: http://backend:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: threatroom
+      POSTGRES_PASSWORD: threatroom
+      POSTGRES_DB: threatroom
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - threatroom-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U threatroom -d threatroom"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  threatroom-data:
+  threatroom-postgres:

@@ -1,0 +1,286 @@
+"use client";
+
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
+
+import type { NewsEventView } from "@/lib/news-types";
+import { clusterNewsEvents } from "@/lib/news-view";
+import { BASEMAP, LAND_PATHS, projectLocation, WORLD_HEIGHT, WORLD_WIDTH } from "@/lib/world-map";
+
+type LocatedEvent = NewsEventView & { location: NonNullable<NewsEventView["location"]> };
+type MapView = { zoom: 1 | 2 | 3; panX: number; panY: number; selectionId: string | null };
+type MapDrag = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  panX: number;
+  panY: number;
+  width: number;
+  height: number;
+  target: HTMLDivElement;
+};
+
+const LONGITUDES = [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150];
+const LATITUDES = [-60, -30, 0, 30, 60];
+const SEVERITY_LABELS = { unknown: "Unknown severity", low: "Low severity", moderate: "Moderate severity", high: "High severity" } as const;
+
+function hasLocation(event: NewsEventView): event is LocatedEvent {
+  const location = event.location;
+  return event.scope === "located" && Boolean(location && Number.isFinite(location.lon) && Number.isFinite(location.lat)
+    && location.lon >= -180 && location.lon <= 180 && location.lat >= -90 && location.lat <= 90);
+}
+
+function isIllustrative(event: LocatedEvent): boolean {
+  return event.is_demo || event.location.precision === "illustrative";
+}
+
+function locationDescription(event: LocatedEvent): string {
+  if (isIllustrative(event)) return "DEMO / illustrative location";
+  return event.location.precision === "approximate_area" ? "Approximate area reference" : "Source-reported point";
+}
+
+function coordinates(event: LocatedEvent): string {
+  const { lat, lon, precision } = event.location;
+  const digits = precision === "source_point" ? 2 : 1;
+  return `${Math.abs(lat).toFixed(digits)}° ${lat < 0 ? "S" : "N"} · ${Math.abs(lon).toFixed(digits)}° ${lon < 0 ? "W" : "E"}`;
+}
+
+function storyLabel(count: number): string {
+  return `${count} ${count === 1 ? "story" : "stories"}`;
+}
+
+function boundView(view: MapView): MapView {
+  const limit = (view.zoom - 1) * 50;
+  return { ...view, panX: Math.max(-limit, Math.min(limit, view.panX)), panY: Math.max(-limit, Math.min(limit, view.panY)) };
+}
+
+function centerLocation(view: MapView, location: { lon: number; lat: number }): MapView {
+  const point = projectLocation(location.lon, location.lat);
+  return boundView({ ...view, panX: (50 - point.x / WORLD_WIDTH * 100) * view.zoom, panY: (50 - point.y / WORLD_HEIGHT * 100) * view.zoom });
+}
+
+export function NewsMap({ events, selectedId, onSelect }: {
+  events: NewsEventView[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const id = useId().replaceAll(":", "");
+  const located = useMemo(() => events.filter(hasLocation), [events]);
+  const selected = located.find((event) => event.id === selectedId);
+  const [storedView, setView] = useState<MapView>({ zoom: 1, panX: 0, panY: 0, selectionId: selectedId });
+  const [clusterId, setClusterId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef<MapDrag | null>(null);
+  const chooserHeading = useRef<HTMLHeadingElement | null>(null);
+  const clusterTrigger = useRef<HTMLButtonElement | null>(null);
+  const currentSelection = { ...storedView, selectionId: selectedId };
+  const view = storedView.selectionId !== selectedId && selected && storedView.zoom > 1
+    ? centerLocation(currentSelection, selected.location)
+    : currentSelection;
+  // Remember the current selection so returning to an earlier event cannot reuse an old pan.
+  if (storedView.selectionId !== selectedId) setView(view);
+  const zoom = storedView.zoom;
+  const markers = useMemo(() => clusterNewsEvents(located, zoom), [located, zoom]);
+  const activeCluster = markers.find((marker) => marker.kind === "cluster" && marker.id === clusterId);
+  const activeClusterId = activeCluster?.id;
+  const panLimit = (view.zoom - 1) * 50;
+  const demoCount = located.filter(isIllustrative).length;
+
+  useEffect(() => {
+    if (activeClusterId) chooserHeading.current?.focus({ preventScroll: false });
+  }, [activeClusterId]);
+
+  function stopDrag() {
+    const active = drag.current;
+    drag.current = null;
+    if (active?.target.hasPointerCapture(active.pointerId)) active.target.releasePointerCapture(active.pointerId);
+    setDragging(false);
+  }
+
+  function changeZoom(zoom: MapView["zoom"]) {
+    stopDrag();
+    setClusterId(null);
+    const next = { ...view, zoom };
+    setView(view.zoom === 1 && selected && zoom > 1
+      ? centerLocation(next, selected.location)
+      : boundView({ ...next, panX: view.panX * zoom / view.zoom, panY: view.panY * zoom / view.zoom }));
+  }
+
+  function panBy(x: number, y: number) {
+    stopDrag();
+    setView(boundView({ ...view, panX: view.panX + x, panY: view.panY + y }));
+  }
+
+  function startDrag(event: PointerEvent<HTMLDivElement>) {
+    if (view.zoom === 1 || !event.isPrimary || event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest("button, a")) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    drag.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, panX: view.panX, panY: view.panY, width: bounds.width, height: bounds.height, target: event.currentTarget };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    setDragging(true);
+  }
+
+  function moveDrag(event: PointerEvent<HTMLDivElement>) {
+    const active = drag.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    setView(boundView({ ...view, panX: active.panX + (event.clientX - active.startX) / active.width * 100, panY: active.panY + (event.clientY - active.startY) / active.height * 100 }));
+    event.preventDefault();
+  }
+
+  function handleMapKey(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "+" || event.key === "=") {
+      if (view.zoom < 3) changeZoom((view.zoom + 1) as MapView["zoom"]);
+    } else if (event.key === "-") {
+      if (view.zoom > 1) changeZoom((view.zoom - 1) as MapView["zoom"]);
+    } else if (event.key === "Home") changeZoom(1);
+    else if (view.zoom > 1 && event.key === "ArrowLeft") panBy(15, 0);
+    else if (view.zoom > 1 && event.key === "ArrowRight") panBy(-15, 0);
+    else if (view.zoom > 1 && event.key === "ArrowUp") panBy(0, 15);
+    else if (view.zoom > 1 && event.key === "ArrowDown") panBy(0, -15);
+    else return;
+    event.preventDefault();
+  }
+
+  function selectEvent(event: LocatedEvent) {
+    stopDrag();
+    if (activeCluster && clusterTrigger.current?.isConnected) clusterTrigger.current.focus({ preventScroll: true });
+    setClusterId(null);
+    if (view.zoom > 1) setView(centerLocation({ ...view, selectionId: event.id }, event.location));
+    onSelect(event.id);
+  }
+
+  function closeChooser() {
+    setClusterId(null);
+    if (clusterTrigger.current?.isConnected) clusterTrigger.current.focus({ preventScroll: true });
+  }
+
+  return <section className="news-map" aria-labelledby={`${id}-title`}>
+    <header className="news-map-heading">
+      <h2 id={`${id}-title`}>The world in view</h2>
+      <div className="news-map-coverage">
+        <span><strong>{located.length}</strong> mapped {located.length === 1 ? "event" : "events"}</span>
+        <span><strong>{events.length - located.length}</strong> without a point</span>
+      </div>
+    </header>
+
+    {located.length ? <>
+      <div className="news-map-toolbar" role="group" aria-label="Map view controls">
+        <div className="news-map-zoom">
+          <button type="button" onClick={() => changeZoom((view.zoom - 1) as MapView["zoom"])} disabled={view.zoom === 1} aria-label="Zoom out">−</button>
+          <output aria-live="polite" aria-label="Map zoom">{view.zoom}×</output>
+          <button type="button" onClick={() => changeZoom((view.zoom + 1) as MapView["zoom"])} disabled={view.zoom === 3} aria-label="Zoom in">+</button>
+          <button type="button" onClick={() => changeZoom(1)} disabled={view.zoom === 1}>World view</button>
+        </div>
+        {view.zoom > 1 ? <div className="news-map-pan" role="group" aria-label="Pan map">
+          <button type="button" onClick={() => panBy(15, 0)} disabled={view.panX >= panLimit} aria-label="Pan west">←</button>
+          <button type="button" onClick={() => panBy(0, 15)} disabled={view.panY >= panLimit} aria-label="Pan north">↑</button>
+          <button type="button" onClick={() => panBy(0, -15)} disabled={view.panY <= -panLimit} aria-label="Pan south">↓</button>
+          <button type="button" onClick={() => panBy(-15, 0)} disabled={view.panX <= -panLimit} aria-label="Pan east">→</button>
+          <span>Drag to pan</span>
+        </div> : <span className="news-map-toolbar-note">Select a circle to explore the coverage.</span>}
+      </div>
+
+      <p id={`${id}-help`} className="sr-only">Event circles show story counts, not severity scores. Markers labeled events group nearby, separate events. Select a group to choose an event. Use the zoom and pan controls, or focus the map and use plus, minus, Home, and arrow keys. The expandable located event index provides equivalent selection controls.</p>
+      <div className={`news-map-chart${view.zoom > 1 ? " is-zoomed" : ""}${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="World news event map" aria-describedby={`${id}-help`} onKeyDown={handleMapKey} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
+        <div className="news-map-plane" style={{ transform: `translate(${view.panX}%, ${view.panY}%) scale(${view.zoom})` }}>
+          <svg className="news-map-svg" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
+            <defs>
+              <linearGradient id={`${id}-ocean`} x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#364144" />
+                <stop offset="100%" stopColor="#20292d" />
+              </linearGradient>
+              <linearGradient id={`${id}-land`} x1="0" y1="0" x2="0.8" y2="1">
+                <stop offset="0%" stopColor="#d0c7b5" />
+                <stop offset="100%" stopColor="#9c927c" />
+              </linearGradient>
+            </defs>
+            <rect width={WORLD_WIDTH} height={WORLD_HEIGHT} fill={`url(#${id}-ocean)`} />
+            <g className="news-map-graticule">
+              {LONGITUDES.map((lon) => <line key={lon} x1={projectLocation(lon, 0).x} y1="0" x2={projectLocation(lon, 0).x} y2={WORLD_HEIGHT} />)}
+              {LATITUDES.map((lat) => <line key={lat} x1="0" y1={projectLocation(0, lat).y} x2={WORLD_WIDTH} y2={projectLocation(0, lat).y} />)}
+            </g>
+            <g className="news-map-land" fill={`url(#${id}-land)`}>
+              {LAND_PATHS.map((path, index) => <path key={index} d={path} fillRule="evenodd" />)}
+            </g>
+          </svg>
+
+          <div className="news-map-markers">
+            {markers.map((marker) => {
+              const point = projectLocation(marker.lon, marker.lat);
+              const chosen = marker.events.some((event) => event.id === selectedId);
+              const includesDemo = marker.events.some((event) => hasLocation(event) && isIllustrative(event));
+              const onlyDemo = marker.events.every((event) => hasLocation(event) && isIllustrative(event));
+              const style: CSSProperties = { left: `${point.x / WORLD_WIDTH * 100}%`, top: `${point.y / WORLD_HEIGHT * 100}%`, transform: `translate(-50%, -50%) scale(${1 / view.zoom})` };
+              if (marker.kind === "cluster") return <button key={marker.id} type="button" className={`news-map-marker news-map-cluster${chosen ? " is-selected" : ""}${onlyDemo ? " is-demo" : ""}`} style={style} aria-expanded={activeCluster?.id === marker.id} aria-controls={activeCluster?.id === marker.id ? `${id}-chooser` : undefined} aria-label={`${marker.events.length} separate nearby events, ${storyLabel(marker.story_count)} in total. ${includesDemo ? "Includes DEMO events. " : ""}Open event chooser.`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => {
+                stopDrag();
+                clusterTrigger.current = event.currentTarget;
+                setClusterId(marker.id);
+              }}>
+                <strong>{marker.events.length} events</strong>
+                <span>{storyLabel(marker.story_count)}</span>
+                {includesDemo ? <span className="news-map-marker-origin">DEMO{onlyDemo ? "" : " included"}</span> : null}
+              </button>;
+              const event = marker.events[0];
+              if (!event || !hasLocation(event)) return null;
+              const severity = SEVERITY_LABELS[event.severity];
+              const markerSize = Math.round(44 + Math.min(24, Math.sqrt(event.story_count) * 3));
+              return <button key={marker.id} type="button" className={`news-map-marker severity-${event.severity}${chosen ? " is-selected" : ""}${isIllustrative(event) ? " is-demo" : ""}${event.location.lat < -15 ? " is-southern" : ""}`} style={{ ...style, "--news-marker-size": `${markerSize}px` } as CSSProperties} aria-pressed={chosen} aria-label={`${event.title}. ${storyLabel(event.story_count)}. ${severity}. Status: ${event.status}. ${locationDescription(event)}: ${event.location.label}. Select event.`} title={`${event.title} · ${storyLabel(event.story_count)} · ${severity} · ${locationDescription(event)}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => selectEvent(event)}>
+                <span className="news-map-marker-count" aria-hidden="true">{event.story_count}</span>
+                <span className="news-map-marker-caption" aria-hidden="true"><span className="news-map-caption-volume">{event.story_count === 1 ? "story" : "stories"} · </span>{event.severity === "unknown" ? "Severity unknown" : `${event.severity} severity`}{isIllustrative(event) ? <span className="news-map-inline-demo"> · DEMO</span> : null}</span>
+                {isIllustrative(event) ? <span className="news-map-marker-origin" aria-hidden="true">DEMO</span> : event.location.precision === "approximate_area" ? <span className="news-map-marker-origin" aria-hidden="true">Approximate area</span> : null}
+              </button>;
+            })}
+          </div>
+        </div>
+      </div>
+
+      {activeCluster ? <section id={`${id}-chooser`} className="news-map-chooser" aria-labelledby={`${id}-chooser-title`} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeChooser(); } }}>
+        <div className="news-map-chooser-heading">
+          <h3 id={`${id}-chooser-title`} ref={chooserHeading} tabIndex={-1}>{activeCluster.events.length} nearby events · {storyLabel(activeCluster.story_count)}</h3>
+          <button type="button" onClick={closeChooser}>Close chooser</button>
+        </div>
+        <p>These are separate events grouped for map readability. Their stories have not been combined into one incident.</p>
+        <div className="news-map-chooser-list">
+          {activeCluster.events.filter(hasLocation).map((event) => <button type="button" key={event.id} onClick={() => selectEvent(event)} aria-pressed={selectedId === event.id}>
+            <strong>{event.title}</strong>
+            <span>{storyLabel(event.story_count)} · {SEVERITY_LABELS[event.severity]} · {event.status}</span>
+            <span>{event.location.label} · {locationDescription(event)}</span>
+          </button>)}
+        </div>
+      </section> : null}
+
+      <div className="news-map-status" aria-live="polite" aria-atomic="true">
+        {selected ? <>
+          <strong>{selected.title}</strong>
+          <span>{selected.location.label} · {coordinates(selected)} · {locationDescription(selected)}</span>
+          <span>Location confidence: {selected.location.confidence}. {selected.location.basis}</span>
+        </> : <span>Select an event to view its stories. Locations are reference points, not impact areas.</span>}
+      </div>
+      <div className="news-map-legend" aria-label="Map legend">
+        <span>Circle number = stories in this view.</span>
+        <span>“N events” = separate nearby events.</span>
+        <span>Severity: <i className="severity-high" aria-hidden="true" /> high · <i className="severity-moderate" aria-hidden="true" /> moderate · <i className="severity-low" aria-hidden="true" /> low · <i className="severity-unknown" aria-hidden="true" /> unknown.</span>
+        {demoCount ? <span>DEMO labels identify illustrative locations ({demoCount}).</span> : null}
+        <span>Story volume does not establish severity or corroboration.</span>
+        <a href={BASEMAP.terms} target="_blank" rel="noreferrer">Natural Earth map data <span className="sr-only">(opens in a new tab)</span></a>
+      </div>
+
+      <details className="news-map-index">
+        <summary>Located event index · {located.length}</summary>
+        <div className="news-map-index-list" aria-label="Located events, including overlapping points">
+          {located.map((event) => <button key={event.id} type="button" onClick={() => selectEvent(event)} aria-pressed={selectedId === event.id} className={selectedId === event.id ? "is-selected" : undefined}>
+            <strong>{event.title}</strong>
+            <span>{storyLabel(event.story_count)} · {SEVERITY_LABELS[event.severity]}</span>
+            <span>{event.location.label} · {locationDescription(event)}</span>
+          </button>)}
+        </div>
+      </details>
+    </> : <div className="news-map-empty">
+      <strong>{events.length ? "No mapped locations in this view." : "No events match this view."}</strong>
+      <p>{events.length ? `${events.length} ${events.length === 1 ? "event remains" : "events remain"} in the feed. Global coverage and events without a supported location are not assigned map points.` : "Change the topic, date window, or search to explore available coverage."}</p>
+    </div>}
+  </section>;
+}

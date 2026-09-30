@@ -1,0 +1,20 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {"title": "SYNTHETIC USGS-shaped test fixture, not live agency data", "count": 2},
+  "features": [
+    {
+      "type": "Feature", "id": "demoqa001",
+      "properties": {
+        "type": "earthquake", "mag": 6.2, "place": "Synthetic coastal test region",
+        "time": 1777204800000, "updated": 1777204860000,
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/demoqa001",
+        "status": "automatic"
+      },
+      "geometry": {"type": "Point", "coordinates": [-120, 35, 10]}
+    },
+    {
+      "type": "Feature", "id": "demoqa002",
+      "properties": {"type": "quarry blast", "mag": 2.8}
+    }
+  ]
+}
