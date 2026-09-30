@@ -49,8 +49,8 @@ export function getThreat(id: string): Promise<ThreatDetailResponse> {
   return requestJson<ThreatDetailResponse>(`/threats/${encodeURIComponent(id)}`);
 }
 
-export function getNews(edition: "demo" | "snapshot" = "snapshot"): Promise<NewsResponse> {
-  return requestJson<NewsResponse>(`/news?edition=${encodeURIComponent(edition)}`);
+export function getNews(edition: "demo" | "snapshot" = "snapshot", channel: "news" | "signals" | "all" = "news"): Promise<NewsResponse> {
+  return requestJson<NewsResponse>(`/news?edition=${encodeURIComponent(edition)}&channel=${encodeURIComponent(channel)}`);
 }
 
 function isConnectorStatusResponse(value: unknown): value is ConnectorStatusResponse {

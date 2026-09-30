@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     create_db_on_startup: bool = True
     seed_demo_data: bool = True
     news_snapshot_path: str = "./.artifacts/news/nasa-snapshot.json"
+    news_poll_interval_seconds: int = Field(default=900, ge=900, le=86400)
+    news_gdelt_query: str = Field(default="(explosion OR attack OR protest OR evacuation OR wildfire OR flood) sourcelang:english", min_length=3, max_length=500)
+
+    @field_validator("news_gdelt_query")
+    @classmethod
+    def bounded_query(cls, value: str) -> str:
+        if "://" in value or any(ord(character) < 32 for character in value):
+            raise ValueError("GDELT query must be bounded text, not a URL or control characters")
+        return value
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

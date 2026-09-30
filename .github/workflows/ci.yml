@@ -65,7 +65,14 @@ jobs:
           with urlopen('http://localhost:3000/') as response:
               html = response.read().decode().lower()
               assert 'iran reported explosion exercise' not in html
-              assert 'global voices' in html and 'gdacs' in html
+              assert 'global voices' in html and 'gdelt' in html
+              assert 'coverage intensity' in html
+          with urlopen('http://localhost:8000/news?channel=signals') as response:
+              bulletins = json.load(response)
+          assert bulletins['channel'] == 'signals'
+          assert {source['source_id'] for source in bulletins['sources']} == {'gdacs', 'nasa'}
+          with urlopen('http://localhost:3000/signals?view=bulletins') as response:
+              assert response.status == 200
           with urlopen('http://localhost:3000/?edition=demo') as response:
               assert response.status == 200
               html = response.read().decode().lower()

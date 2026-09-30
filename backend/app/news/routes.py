@@ -12,5 +12,6 @@ router = APIRouter(tags=["news"])
 
 
 @router.get("/news", response_model=NewsResponse)
-def get_news(edition: Literal["demo", "snapshot"] = "snapshot") -> NewsResponse:
-    return demo_news() if edition == "demo" else read_sources(Path(get_settings().news_snapshot_path))
+def get_news(edition: Literal["demo", "snapshot"] = "snapshot",
+             channel: Literal["news", "signals", "all"] = "news") -> NewsResponse:
+    return demo_news().model_copy(update={"channel": channel}) if edition == "demo" else read_sources(Path(get_settings().news_snapshot_path), channel=channel)

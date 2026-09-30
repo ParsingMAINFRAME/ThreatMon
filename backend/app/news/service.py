@@ -17,14 +17,15 @@ import httpx
 from pydantic import AwareDatetime, Field, ValidationError, field_validator
 
 from app.core.time import utc_now
-from app.news.models import NewsArticle, NewsEvent, NewsModel, NewsResponse, NewsSourceStatus
+from app.core.config import get_settings
+from app.news.models import NewsArticle, NewsEvent, NewsModel, NewsResponse, NewsSourceStatus, NewsObservation
 from app.news.urls import ArticleCandidate, canonical_url, deduplicate_articles
 
 NASA_FEED_URL = "https://www.nasa.gov/feed/"
 GLOBALVOICES_FEED_URL = "https://globalvoices.org/feed/"
 GDACS_FEED_URL = "https://www.gdacs.org/xml/rss.xml"
 MAX_FEED_BYTES = 1024 * 1024
-MAX_CACHE_BYTES = 2 * 1024 * 1024
+MAX_CACHE_BYTES = 8 * 1024 * 1024
 MAX_ITEMS = 10
 MIN_CACHE_SECONDS = 300
 SOURCE_NOTE = ("NASA RSS article metadata, attributed to NASA; no endorsement is implied. Each article remains a separate "
@@ -48,18 +49,23 @@ SOURCES = {
     "globalvoices": SourceConfig("Global Voices", "news", GLOBALVOICES_FEED_URL,
         "https://globalvoices.org/about/global-voices-attribution-policy/",
         "Global Voices and each named author; CC BY 3.0. Headlines and attribution only; no endorsement implied.",
-        "At most 20 independent publisher articles. Publication is not independent verification; no inferred incident grouping or coordinates.", 900),
+        "At most 20 independent publisher articles. The RSS supplies no verified event association or incident coordinates; candidate associations are separate heuristics.", 900),
+    "gdelt": SourceConfig("GDELT DOC", "discovery", "https://api.gdeltproject.org/api/v2/doc/doc",
+        "https://gdeltproject.org/about.html",
+        "Discovery metadata provided by GDELT; article attribution belongs to each linked publisher. No article content licence or endorsement is implied.",
+        "At most 250 collected canonical URLs retained for seven days after first ThreatMon collection. Query results may be capped and incomplete. seendate is an unverified provider timestamp, not publication. Publisher identity is a normalized URL hostname; publisher-country metadata is not incident geography.", 900),
     "gdacs": SourceConfig("GDACS", "official", GDACS_FEED_URL, "https://www.gdacs.org/About/termofuse.aspx",
         "GDACS / European Commission and United Nations. EU-owned content follows the linked Commission reuse policy; third-party rights remain separate. Metadata normalized; no endorsement implied.",
         "Only the latest 30 source events from available feed records are retained; this is not complete disaster coverage. Event IDs group revisions only. Source alert levels model potential humanitarian impact; reference points are approximate, and source date windows may include forecasts. Not population warnings.", 900),
     "nasa": SourceConfig("NASA", "news", NASA_FEED_URL, "https://www.nasa.gov/nasa-brand-center/images-and-media/",
         "NASA article metadata; no endorsement implied.", SOURCE_NOTE, 300),
 }
-AGGREGATE_NOTE = ("Operator-fetched metadata from Global Voices, GDACS and NASA; no automatic polling or completeness guarantee. "
+CHANNEL_SOURCES = {"news": ("globalvoices", "gdelt"), "signals": ("gdacs", "nasa"), "all": tuple(SOURCES)}
+AGGREGATE_NOTE = ("Collected source metadata; no completeness guarantee. Polling runs only when an operator explicitly starts the CLI worker. "
                   "fetched_at is the latest successful retrieval or revalidation of ANY source; inspect each source's own status and clock. "
-                  "Publication dates are feed-record publication times, not incident occurrence times. Article retrieved_at remains the last body retrieval. "
+                  "Publication dates, where supplied, are not incident occurrence times. first_seen_at is first ThreatMon collection; provider timestamps retain their own provenance and uncertain meaning. "
                   "Source windows are source-provided periods, possibly forecasts. Time filters use the response as_of clock. "
-                  "No article text, images, inferred geocoding, or cross-publisher event clustering is retained.")
+                  "Candidate article associations are heuristics, not verified incidents or independent corroboration. No article bodies, images or inferred coordinates are retained.")
 
 
 class NewsError(ValueError):
@@ -73,6 +79,12 @@ class NewsCache(NewsModel):
     etag: str | None = Field(default=None, max_length=1024)
     last_modified: str | None = Field(default=None, max_length=200)
     next_fetch_at: AwareDatetime
+    query_watermark: AwareDatetime | None = None
+    query_window_start: AwareDatetime | None = None
+    query_window_end: AwareDatetime | None = None
+    query: str | None = Field(default=None, max_length=500)
+    watermark_query: str | None = Field(default=None, max_length=500)
+    possibly_truncated: bool = False
 
     @field_validator("etag", "last_modified")
     @classmethod
@@ -149,6 +161,7 @@ def parse_nasa_feed(body: bytes, *, retrieved_at: datetime) -> tuple[list[NewsEv
             identity = hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
             article = NewsArticle(id=f"nasa-article-{identity}", canonical_url=url, headline=headline, publisher="NASA",
                                   published_at=published, retrieved_at=retrieved_at, summary=summary,
+                                  observations=[NewsObservation(provider_id="nasa", provider_url=NASA_FEED_URL, retrieved_at=retrieved_at)],
                                   is_demo=False, syndication_key=None, duplicate_urls=[])
             candidates.append(ArticleCandidate(article))
         except NewsError:
@@ -197,13 +210,18 @@ def source_cache_path(path: Path | str, source: str) -> Path:
     return path if source == "nasa" else path.with_name(f"{path.stem}.{source}{path.suffix or '.json'}")
 
 
-def _with_status(response: NewsResponse, source: str, next_fetch_at: datetime | None = None) -> NewsResponse:
+def _with_status(response: NewsResponse, source: str, next_fetch_at: datetime | None = None, cache: NewsCache | None = None) -> NewsResponse:
     config = SOURCES[source]
     status = NewsSourceStatus(source_id=source, publisher_id=source, name=config.name, kind=config.kind,
                               feed_url=config.feed_url, terms_url=config.terms_url, attribution=config.attribution,
                               coverage_note=config.coverage_note, last_attempt_at=response.last_attempt_at,
                               last_success_at=response.fetched_at, state=response.fetch_state, error=response.error,
-                              item_count=sum(len(event.articles) for event in response.events), next_fetch_at=next_fetch_at)
+                              item_count=sum(len(event.articles) for event in response.events), next_fetch_at=next_fetch_at,
+                              query_window_start=cache.query_window_start if cache else None,
+                              query_window_end=cache.query_window_end if cache else None,
+                              query=cache.query if cache else get_settings().news_gdelt_query if source == "gdelt" else None,
+                              result_limit=250 if source == "gdelt" else None,
+                              possibly_truncated=cache.possibly_truncated if cache else False)
     return response.model_copy(update={"sources": [status]})
 
 
@@ -213,30 +231,38 @@ def read_news(path: Path | str, *, now: datetime | None = None, source: str = "n
     try:
         cache = _load_cache(path, source)
         response = cache.response.model_copy(update={"as_of": now}) if cache else _empty(now, source=source)
-        return _with_status(response, source, cache.next_fetch_at if cache else None)
+        return _with_status(response, source, cache.next_fetch_at if cache else None, cache)
     except NewsError as error:
         return _with_status(_empty(now, error=str(error), source=source), source)
 
 
-def _aggregate(responses: list[NewsResponse], now: datetime) -> NewsResponse:
+def _aggregate(responses: list[NewsResponse], now: datetime, channel: str = "all") -> NewsResponse:
+    from app.news.gdelt import article_clock, merge_articles
+    from app.news.grouping import group_candidate_events
     sources = [status for response in responses for status in response.sources]
     states = {status.state for status in sources}
     state = "ok" if states == {"ok"} else "partial" if "ok" in states else "error" if "error" in states else "never_fetched"
     successes = [status.last_success_at for status in sources if status.last_success_at]
     attempts = [status.last_attempt_at for status in sources if status.last_attempt_at]
     errors = [f"{status.name}: {status.error}" for status in sources if status.error]
-    events = [event for response in responses for event in response.events]
-    events.sort(key=lambda event: (-max(article.published_at for article in event.articles).timestamp(), event.id))
+    source_events = [event for response in responses for event in response.events]
+    news_articles = [article for event in source_events for article in event.articles if article.source_id in {"globalvoices", "gdelt"}]
+    events = [event for event in source_events if all(article.source_id not in {"globalvoices", "gdelt"} for article in event.articles)]
+    merged = merge_articles(news_articles)
+    events.extend(group_candidate_events(merged, previous_events=source_events))
+    events.sort(key=lambda event: (-max(article_clock(article) for article in event.articles).timestamp(), event.id))
     return NewsResponse(edition="snapshot", as_of=now, fetched_at=max(successes) if successes else None,
                         last_attempt_at=max(attempts) if attempts else None, fetch_state=state,
                         error="; ".join(errors)[:500] if errors else None, events=events,
-                        duplicates_excluded=sum(response.duplicates_excluded for response in responses),
-                        source_note=AGGREGATE_NOTE, sources=sources)
+                        duplicates_excluded=sum(response.duplicates_excluded for response in responses) + len(news_articles) - len(merged),
+                        source_note=AGGREGATE_NOTE, sources=sources, channel=channel)
 
 
-def read_sources(path: Path | str, *, now: datetime | None = None) -> NewsResponse:
+def read_sources(path: Path | str, *, now: datetime | None = None, channel: str = "news") -> NewsResponse:
+    if channel not in CHANNEL_SOURCES:
+        raise ValueError("Unknown news channel")
     now = now or utc_now()
-    return _aggregate([read_news(path, now=now, source=source) for source in SOURCES], now)
+    return _aggregate([read_news(path, now=now, source=source) for source in CHANNEL_SOURCES[channel]], now, channel)
 
 
 def _save_cache(path: Path, cache: NewsCache) -> None:
@@ -317,6 +343,8 @@ async def _fetch(client: httpx.AsyncClient, cache: NewsCache | None, now: dateti
 
 async def ingest_news(path: Path | str, *, client: httpx.AsyncClient | None = None, now: datetime | None = None,
                       source: str = "nasa") -> NewsResponse:
+    if source == "gdelt":
+        return await ingest_gdelt(path, client=client, now=now)
     base = Path(path)
     path = source_cache_path(base, source)
     config = SOURCES[source]
@@ -373,3 +401,80 @@ async def ingest_sources(path: Path | str, *, source: str = "all", client: httpx
     fetched = await asyncio.gather(*(ingest_news(path, source=name, client=client, now=now) for name in selected))
     responses = dict(zip(selected, fetched))
     return _aggregate([responses[name] if name in responses else read_news(path, source=name, now=now) for name in SOURCES], now)
+
+
+async def ingest_gdelt(path: Path | str, *, client: httpx.AsyncClient | None = None,
+                       now: datetime | None = None) -> NewsResponse:
+    """One request per import; preserve good metadata and query progress independently."""
+    from app.news.gdelt import GDELT_URL, GDELT_LIMIT, merge_articles, parse_gdelt_response
+    from app.news.grouping import group_candidate_events
+    now = now or utc_now()
+    base = Path(path)
+    target = source_cache_path(base, "gdelt")
+    try:
+        cache = _load_cache(target, "gdelt")
+    except NewsError:
+        cache = None
+    previous = cache.response if cache else _empty(now, source="gdelt")
+    if cache and now < cache.next_fetch_at:
+        return _with_status(previous.model_copy(update={"as_of": now}), "gdelt", cache.next_fetch_at, cache)
+    if client is None:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as owned_client:
+            return await ingest_gdelt(base, client=owned_client, now=now)
+    query = get_settings().news_gdelt_query
+    end = now.replace(microsecond=0)
+    watermark = cache.query_watermark if cache and cache.watermark_query == query else None
+    desired_start = watermark - timedelta(minutes=15) if watermark else end - timedelta(hours=24)
+    start = max(desired_start, end - timedelta(days=7))
+    # A backwards system clock never produces a reversed request window.
+    start = min(start, end - timedelta(minutes=15))
+    truncated = bool(cache and cache.possibly_truncated) or start > desired_start
+    parameters = {"query": query, "mode": "ArtList", "format": "json", "maxrecords": str(GDELT_LIMIT),
+                  "sort": "DateDesc", "startdatetime": start.strftime("%Y%m%d%H%M%S"),
+                  "enddatetime": end.strftime("%Y%m%d%H%M%S")}
+    cooldown = 900
+    try:
+        async with asyncio.timeout(45):
+            async with client.stream("GET", GDELT_URL, params=parameters,
+                                     headers={"User-Agent": "ThreatMon/0.4 (bounded metadata portfolio client)", "Accept": "application/json"},
+                                     timeout=15, follow_redirects=False) as response:
+                if response.status_code != 200:
+                    raise NewsError(f"GDELT returned HTTP {response.status_code}; no immediate retry", _retry_after(response.headers.get("retry-after"), now))
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > MAX_FEED_BYTES:
+                        raise NewsError("GDELT response exceeds the 1 MiB limit")
+                cooldown = _cache_seconds(response.headers, 900)
+        new_events, excluded = parse_gdelt_response(bytes(body), retrieved_at=now)
+        new_articles = [article for event in new_events for article in event.articles]
+        existing = [article for event in previous.events for article in event.articles]
+        combined = merge_articles([*existing, *new_articles])
+        recent = [article for article in combined if (article.first_seen_at or article.retrieved_at) >= now - timedelta(days=7)]
+        recent.sort(key=lambda article: (-(article.first_seen_at or article.retrieved_at).timestamp(), article.id))
+        # Raw count reaching the provider cap leaves completeness unknown even after deduplication.
+        import json
+        truncated = truncated or len(json.loads(body)["articles"]) == GDELT_LIMIT or len(recent) > GDELT_LIMIT
+        events = group_candidate_events(recent[:GDELT_LIMIT], previous_events=previous.events)
+        result = NewsResponse(edition="snapshot", as_of=now, fetched_at=now, last_attempt_at=now, fetch_state="ok",
+                              events=events, duplicates_excluded=excluded, source_note=SOURCES["gdelt"].coverage_note)
+        stored = NewsCache(response=result, next_fetch_at=_next_fetch(now, cooldown), query_watermark=end,
+                           query_window_start=start, query_window_end=end, query=query, watermark_query=query,
+                           possibly_truncated=truncated)
+    except (NewsError, TimeoutError, ValidationError, httpx.HTTPError) as error:
+        message = str(error) if isinstance(error, NewsError) else "GDELT request failed; retained metadata preserved; no immediate retry"
+        cooldown = max(900, getattr(error, "retry_after", 0))
+        result = previous.model_copy(update={"as_of": now, "last_attempt_at": now, "fetch_state": "error", "error": message[:500]})
+        stored = NewsCache(response=result, next_fetch_at=_next_fetch(now, cooldown),
+                           query_watermark=cache.query_watermark if cache else None,
+                           watermark_query=cache.watermark_query if cache else None,
+                           query_window_start=start, query_window_end=end, query=query, possibly_truncated=truncated)
+    result = _with_status(result, "gdelt", stored.next_fetch_at, stored)
+    stored.response = result
+    try:
+        _save_cache(target, stored)
+    except (OSError, NewsError):
+        return _with_status(previous.model_copy(update={"as_of": now, "last_attempt_at": now, "fetch_state": "error",
+                            "error": "Could not save GDELT cache; previous disk snapshot remains unchanged"}),
+                            "gdelt", cache.next_fetch_at if cache else None, cache)
+    return result

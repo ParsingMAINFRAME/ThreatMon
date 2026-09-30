@@ -25,12 +25,35 @@ class NewsLocation(NewsModel):
         return canonical_url(value) if value is not None else None
 
 
+class NewsObservation(NewsModel):
+    provider_id: str = Field(min_length=1, max_length=100)
+    provider_url: str
+    provider_timestamp: AwareDatetime | None = None
+    provider_timestamp_raw: str | None = Field(default=None, max_length=100)
+    retrieved_at: AwareDatetime
+    language: str | None = Field(default=None, max_length=100)
+    source_country: str | None = Field(default=None, max_length=100)
+
+    @field_validator("provider_timestamp", "retrieved_at")
+    @classmethod
+    def utc_timestamp(cls, value: datetime | None) -> datetime | None:
+        return value.astimezone(UTC) if value is not None else None
+
+    @field_validator("provider_url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        from app.news.urls import canonical_url
+        return canonical_url(value)
+
+
 class NewsArticle(NewsModel):
     id: str = Field(min_length=1, max_length=160)
     canonical_url: str | None
     headline: str = Field(min_length=1, max_length=500)
     publisher: str = Field(min_length=1, max_length=200)
-    published_at: AwareDatetime
+    published_at: AwareDatetime | None
+    first_seen_at: AwareDatetime | None = None
+    observations: list[NewsObservation] = Field(default_factory=list, max_length=32)
     retrieved_at: AwareDatetime
     summary: str = Field(min_length=1, max_length=2000)
     is_demo: bool
@@ -44,7 +67,7 @@ class NewsArticle(NewsModel):
     source_window_start: AwareDatetime | None = None
     source_window_end: AwareDatetime | None = None
 
-    @field_validator("published_at", "retrieved_at", "source_window_start", "source_window_end")
+    @field_validator("published_at", "first_seen_at", "retrieved_at", "source_window_start", "source_window_end")
     @classmethod
     def utc_timestamp(cls, value: datetime | None) -> datetime | None:
         return value.astimezone(UTC) if value is not None else None
@@ -56,6 +79,8 @@ class NewsArticle(NewsModel):
             self.source_id = "demo" if self.is_demo else "nasa"
         if not self.publisher_id:
             self.publisher_id = re.sub(r"[^a-z0-9]+", "-", self.publisher.lower()).strip("-")
+        if self.first_seen_at is None and not self.is_demo:
+            self.first_seen_at = self.retrieved_at
         if self.license_url is not None:
             self.license_url = canonical_url(self.license_url)
         if self.is_demo:
@@ -83,9 +108,13 @@ class NewsEvent(NewsModel):
     location: NewsLocation | None
     scope: Literal["located", "global", "unlocated"]
     is_demo: bool
-    articles: list[NewsArticle] = Field(min_length=1, max_length=100)
+    articles: list[NewsArticle] = Field(min_length=1, max_length=250)
     source_event_id: str | None = Field(default=None, max_length=160)
     source_alert_level: str | None = Field(default=None, max_length=100)
+    grouping_status: Literal["source_event", "single_source", "candidate"] = "source_event"
+    grouping_version: str | None = Field(default=None, max_length=100)
+    place_hints: list[str] = Field(default_factory=list, max_length=8)
+    assignment_revision: str | None = Field(default=None, max_length=160)
 
     @model_validator(mode="after")
     def consistent_evidence(self) -> "NewsEvent":
@@ -109,7 +138,7 @@ class NewsSourceStatus(NewsModel):
     source_id: str = Field(min_length=1, max_length=100)
     publisher_id: str = Field(min_length=1, max_length=200)
     name: str = Field(min_length=1, max_length=200)
-    kind: Literal["news", "official"]
+    kind: Literal["news", "official", "discovery"]
     feed_url: str
     terms_url: str
     attribution: str = Field(min_length=1, max_length=1000)
@@ -120,8 +149,13 @@ class NewsSourceStatus(NewsModel):
     error: str | None = Field(default=None, max_length=500)
     item_count: int = Field(default=0, ge=0)
     next_fetch_at: AwareDatetime | None = None
+    query_window_start: AwareDatetime | None = None
+    query_window_end: AwareDatetime | None = None
+    result_limit: int | None = Field(default=None, ge=1, le=250)
+    possibly_truncated: bool = False
+    query: str | None = Field(default=None, max_length=500)
 
-    @field_validator("last_attempt_at", "last_success_at", "next_fetch_at")
+    @field_validator("last_attempt_at", "last_success_at", "next_fetch_at", "query_window_start", "query_window_end")
     @classmethod
     def utc_timestamp(cls, value: datetime | None) -> datetime | None:
         return value.astimezone(UTC) if value is not None else None
@@ -135,12 +169,13 @@ class NewsSourceStatus(NewsModel):
 
 class NewsResponse(NewsModel):
     edition: Literal["demo", "snapshot"]
+    channel: Literal["news", "signals", "all"] = "all"
     as_of: AwareDatetime
     fetched_at: AwareDatetime | None
     last_attempt_at: AwareDatetime | None
     fetch_state: Literal["demo", "never_fetched", "ok", "error", "partial"]
     error: str | None = Field(default=None, max_length=500)
-    events: list[NewsEvent] = Field(default_factory=list, max_length=100)
+    events: list[NewsEvent] = Field(default_factory=list, max_length=500)
     duplicates_excluded: int = Field(default=0, ge=0)
     source_note: str = Field(min_length=1, max_length=2000)
     sources: list[NewsSourceStatus] = Field(default_factory=list, max_length=10)

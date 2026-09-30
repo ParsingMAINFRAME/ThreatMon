@@ -35,9 +35,9 @@ def test_cache_paths_preserve_legacy_nasa_and_do_not_collide(tmp_path):
 
 
 def test_missing_sources_are_read_only_and_have_independent_status(tmp_path):
-    result = read_sources(tmp_path / "absent.json", now=NOW)
+    result = read_sources(tmp_path / "absent.json", now=NOW, channel="all")
     assert result.fetch_state == "never_fetched" and result.events == []
-    assert {source.source_id for source in result.sources} == {"nasa", "globalvoices", "gdacs"}
+    assert {source.source_id for source in result.sources} == {"nasa", "globalvoices", "gdelt", "gdacs"}
     assert all(source.state == "never_fetched" and source.last_success_at is None for source in result.sources)
     assert list(tmp_path.iterdir()) == []
 
@@ -53,7 +53,7 @@ def test_independent_failure_preserves_other_source_and_partial_truth(tmp_path):
             return httpx.Response(200, content=feed("globalvoices.org"), headers={"ETag": '"gv-1"'})
         return httpx.Response(503, headers={"Retry-After": "3600"})
     good = ingest(base, first)
-    assert len(calls) == 3 and good.fetch_state == "partial" and len(good.events) == 2
+    assert len(calls) == 4 and good.fetch_state == "partial" and len(good.events) == 2
     assert good.fetched_at == NOW
     by_source = {item.source_id: item for item in good.sources}
     assert by_source["gdacs"].state == "error" and by_source["gdacs"].next_fetch_at == NOW + timedelta(hours=1)
@@ -63,7 +63,7 @@ def test_independent_failure_preserves_other_source_and_partial_truth(tmp_path):
     assert failed.fetch_state == "partial" and len(failed.events) == 2
     status = next(item for item in failed.sources if item.source_id == "globalvoices")
     assert status.state == "error" and status.last_success_at == NOW and status.last_attempt_at == later
-    assert read_sources(base, now=later).events == failed.events
+    assert read_sources(base, now=later, channel="all").events == failed.events
 
 
 def test_new_source_cooldown_conditional_and_304_keeps_article_retrieval(tmp_path):
@@ -94,7 +94,7 @@ def test_legacy_nasa_cache_gets_additive_defaults_and_source_health(tmp_path):
             for key in ["source_id", "publisher_id", "record_kind", "author", "license_url", "source_window_start", "source_window_end"]:
                 article.pop(key, None)
     base.write_text(json.dumps(legacy))
-    result = read_sources(base, now=NOW)
+    result = read_sources(base, now=NOW, channel="all")
     assert result.fetch_state == "partial" and result.events[0].articles[0].source_id == "nasa"
     assert NewsResponse.model_validate_json(result.model_dump_json()) == result
 
@@ -103,6 +103,6 @@ def test_corrupt_feed_cache_does_not_hide_good_other_feed(tmp_path):
     base = tmp_path / "news.json"
     ingest(base, lambda request: httpx.Response(200, content=feed("www.nasa.gov")), source="nasa")
     source_cache_path(base, "gdacs").write_text("invalid")
-    result = read_sources(base, now=NOW)
+    result = read_sources(base, now=NOW, channel="all")
     assert result.fetch_state == "partial" and len(result.events) == 1
     assert next(item for item in result.sources if item.source_id == "gdacs").state == "error"

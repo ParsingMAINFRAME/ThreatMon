@@ -1,6 +1,18 @@
-import type { NewsArticle, NewsEvent, NewsEventView, NewsMapGroup, NewsResponse, NewsSourceStatus, NewsViewState, NewsWindow } from "./news-types";
+import type { NewsArticle, NewsChannel, NewsCoverageIntensity, NewsEvent, NewsEventView, NewsMapGroup, NewsResponse, NewsSourceStatus, NewsViewState, NewsWindow } from "./news-types";
 
 const WINDOW_HOURS: Record<NewsWindow, number> = { "1h": 1, "24h": 24, "7d": 168, all: Infinity };
+
+export const COVERAGE_INTENSITY_BANDS = [
+  { intensity: "green", minimum: 1, maximum: 10, label: "1–10 collected articles" },
+  { intensity: "amber", minimum: 11, maximum: 30, label: "11–30 collected articles" },
+  { intensity: "red", minimum: 31, maximum: Infinity, label: "31+ collected articles" },
+] as const;
+
+/** Coverage color describes retained article volume, never impact severity or certainty. */
+export function coverageIntensity(articleCount: number): NewsCoverageIntensity {
+  if (!Number.isSafeInteger(articleCount) || articleCount < 1) return "none";
+  return COVERAGE_INTENSITY_BANDS.find((band) => articleCount >= band.minimum && articleCount <= band.maximum)?.intensity ?? "none";
+}
 
 function timestamp(value: string | null): number | null {
   if (!value || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return null;
@@ -83,25 +95,25 @@ export function newsSources(data: NewsResponse): NewsSourceStatus[] {
   }];
 }
 
-function latest(articles: NewsArticle[], key: "published_at" | "retrieved_at"): string | null {
+function latest(articles: NewsArticle[], key: "published_at" | "first_seen_at" | "retrieved_at"): string | null {
   return articles.reduce<string | null>((value, article) => {
-    const next = timestamp(article[key]);
-    return next !== null && (value === null || next > (timestamp(value) ?? -Infinity)) ? article[key] : value;
+    const next = timestamp(article[key] ?? null);
+    return next !== null && (value === null || next > (timestamp(value) ?? -Infinity)) ? article[key] ?? null : value;
   }, null);
 }
 
-/** Publication windows are anchored to the supplied edition clock, never the browser clock. */
+/** Use publication when known, otherwise the explicitly recorded first collection time. */
 export function buildNewsEvents(events: NewsEvent[], asOf: string, window: NewsWindow, publisherId: string | null = null): NewsEventView[] {
   const end = timestamp(asOf);
   if (end === null) return [];
   const start = end - WINDOW_HOURS[window] * 3_600_000;
   return events.flatMap((event) => {
     const articles = deduplicateNewsArticles(event.articles.filter((article) => {
-      const published = timestamp(article.published_at);
+      const published = timestamp(article.published_at ?? article.first_seen_at ?? null);
       return published !== null && published >= start && published <= end && (!publisherId || newsPublisherId(article) === publisherId);
-    })).sort((a, b) => (timestamp(b.published_at) ?? 0) - (timestamp(a.published_at) ?? 0) || a.id.localeCompare(b.id));
+    })).sort((a, b) => (timestamp(b.published_at ?? b.first_seen_at ?? null) ?? 0) - (timestamp(a.published_at ?? a.first_seen_at ?? null) ?? 0) || a.id.localeCompare(b.id));
     if (!articles.length) return [];
-    return [{ ...event, articles, ...recordCounts(articles), freshest_published_at: latest(articles, "published_at"), last_retrieved_at: latest(articles, "retrieved_at") }];
+    return [{ ...event, articles, ...recordCounts(articles), freshest_published_at: latest(articles, "published_at"), freshest_collected_at: latest(articles, "first_seen_at"), last_retrieved_at: latest(articles, "retrieved_at") }];
   });
 }
 
@@ -175,14 +187,15 @@ export function parseNewsState(params: Pick<URLSearchParams, "get">): NewsViewSt
   };
 }
 
-export function newsHref(state: NewsViewState, edition: "demo" | "snapshot"): string {
-  const params = new URLSearchParams({ edition });
+export function newsHref(state: NewsViewState, edition: "demo" | "snapshot", channel: NewsChannel = "news"): string {
+  const params = new URLSearchParams(channel === "signals" ? { view: "bulletins", edition } : { edition });
+  if (channel === "all") params.set("channel", "all");
   if (state.window !== "24h") params.set("window", state.window);
   if (state.scope !== "all") params.set("scope", state.scope);
   if (state.query) params.set("q", state.query);
   if (state.selectedId) params.set("selected", state.selectedId);
   if (state.publisherId) params.set("publisher", state.publisherId);
-  return `/?${params.toString()}`;
+  return `${channel === "signals" ? "/signals" : "/"}?${params.toString()}`;
 }
 
 export function humanizeNewsLabel(value: string): string {

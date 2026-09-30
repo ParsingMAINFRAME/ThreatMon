@@ -40,6 +40,7 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
   }
 
   const isDemo = edition === "demo" || event.is_demo;
+  const isCandidate = event.grouping_status === "candidate";
   const officialReports = event.articles.filter((article) => (article.record_kind ?? "article") === "official_report");
   const newsArticles = event.articles.filter((article) => (article.record_kind ?? "article") === "article");
   const officialReportCount = event.official_report_count ?? officialReports.length;
@@ -59,13 +60,14 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
       <header className="news-coverage-header">
         <p className="news-eyebrow">Selected coverage / {humanizeNewsLabel(event.category)}</p>
         <span className="news-coverage-badge">{isDemo ? "Synthetic demo scenario" : "Source snapshot"}</span>
+        {isCandidate ? <p className="news-candidate-label">Candidate association · unverified. These reports may not describe the same incident.</p> : null}
         <h2 id="news-coverage-title">{isDemo ? event.title.replace(/^DEMO /, "") : event.title}</h2>
         {isDemo ? <p className="news-coverage-note"><strong>Fictional scenario, not an actual incident.</strong> Severity is an authored assumption.</p> : <p className="news-coverage-summary">{event.summary}</p>}
       </header>
 
       <dl className="news-coverage-metrics">
         {hasNewsArticles ? <>
-          <div><dt>News articles</dt><dd>{event.story_count}</dd></div>
+          <div><dt>Collected articles</dt><dd>{event.story_count}</dd></div>
           <div><dt>News publishers</dt><dd>{newsPublisherCount}</dd></div>
         </> : null}
         {hasOfficialReports ? <>
@@ -73,14 +75,15 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
           <div><dt>Official sources</dt><dd>{officialSourceCount}</dd></div>
         </> : null}
       </dl>
-      <p className="news-coverage-note">Deduplicated within the current filters. Source breadth is not independent corroboration.</p>
+      <p className="news-coverage-note">Deduplicated within the current filters; a potentially capped sample, not a worldwide total. Source breadth is not independent corroboration. Map color describes article volume, not severity.</p>
 
       <dl className="news-coverage-meta">
         <div><dt>Source reporting status</dt><dd>{humanizeNewsLabel(event.status)}</dd></div>
         <div><dt>Severity</dt><dd>{humanizeNewsLabel(event.severity)}</dd></div>
         {event.source_alert_level ? <div><dt>Source-model alert</dt><dd>{event.source_alert_level}. Source assessment, not confirmed impact.</dd></div> : null}
         <div><dt>Location</dt><dd>{locationDescription}</dd></div>
-        <div><dt>Latest publication (UTC)</dt><dd>{formatNewsTime(event.freshest_published_at)}</dd></div>
+        <div><dt>Latest publication (UTC)</dt><dd>{event.freshest_published_at ? formatNewsTime(event.freshest_published_at) : "Not reported"}</dd></div>
+        {event.freshest_collected_at ? <div><dt>Latest first collection (UTC)</dt><dd>{formatNewsTime(event.freshest_collected_at)}</dd></div> : null}
         <div><dt>Latest retrieval (UTC)</dt><dd>{formatNewsTime(event.last_retrieved_at)}</dd></div>
       </dl>
       <details className="news-coverage-details">
@@ -100,6 +103,10 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
           <div><dt>Edition as of (UTC)</dt><dd>{formatNewsTime(asOf)}</dd></div>
           <div><dt>Distinct publishers and agencies</dt><dd>{event.publisher_count}</dd></div>
           <div><dt>Why these records are grouped</dt><dd>{event.grouping_basis}</dd></div>
+          {event.grouping_status ? <div><dt>Association status</dt><dd>{isCandidate ? "Candidate association — unverified" : event.grouping_status === "source_event" ? "Source-identified event" : "Single-source record"}</dd></div> : null}
+          {event.grouping_version ? <div><dt>Grouping method version</dt><dd>{event.grouping_version}</dd></div> : null}
+          {event.assignment_revision ? <div><dt>Assignment revision</dt><dd>{event.assignment_revision}</dd></div> : null}
+          {event.place_hints?.length ? <div><dt>Unverified place mentions</dt><dd>{event.place_hints.join("; ")}. Textual hints only; no incident location is established from these mentions.</dd></div> : null}
         </dl>
         <p className="news-coverage-note">Status describes available reporting, not independent verification. Syndicated stories may share an original report. Retrieval records collection time, not event time.</p>
       </details>
@@ -114,6 +121,8 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
             const url = isSyntheticRecord ? null : safeCoverageUrl(article.canonical_url);
             const licenseUrl = isSyntheticRecord ? null : safeCoverageUrl(article.license_url);
             const hasSourceWindow = Boolean(article.source_window_start || article.source_window_end);
+            const observations = article.observations ?? [];
+            const providers = Array.from(new Set(observations.map((observation) => observation.provider_id === "gdelt" ? "GDELT" : observation.provider_id)));
             return (
               <li key={article.id}>
                 <article className="news-story">
@@ -121,13 +130,27 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
                     <p className="news-eyebrow">{isSyntheticRecord ? `Synthetic demo / ${recordLabel}` : recordLabel}</p>
                     <h4>{article.headline}</h4>
                     <p>{article.author ? <>By {article.author} / </> : null}{article.publisher}{isSyntheticRecord ? " / Demo source label" : ""}</p>
+                    {providers.length ? <p>Discovery provider{providers.length === 1 ? "" : "s"}: {providers.join(", ")}. Publisher attribution is separate.</p> : null}
                   </header>
                   <dl className="news-story-meta">
-                    <div><dt>Published (UTC)</dt><dd>{formatNewsTime(article.published_at)}</dd></div>
+                    <div><dt>Published (UTC)</dt><dd>{article.published_at ? formatNewsTime(article.published_at) : "Not reported"}</dd></div>
+                    {article.first_seen_at ? <div><dt>First collected by ThreatMon (UTC)</dt><dd>{formatNewsTime(article.first_seen_at)}{article.published_at ? "" : "; used for the time filter because publication is unknown"}</dd></div> : null}
                     <div><dt>Retrieved (UTC)</dt><dd>{formatNewsTime(article.retrieved_at)}</dd></div>
                     {hasSourceWindow ? <div><dt>Source coverage window (UTC)</dt><dd>{formatNewsTime(article.source_window_start ?? null)} to {formatNewsTime(article.source_window_end ?? null)}</dd></div> : null}
                   </dl>
                   {hasSourceWindow ? <p className="news-coverage-note">This is the source&apos;s coverage window, not a confirmed occurrence time.</p> : null}
+                  {observations.length ? <details className="news-provider-details">
+                    <summary>Discovery provenance</summary>
+                    {observations.map((observation, index) => {
+                      const providerUrl = isSyntheticRecord ? null : safeCoverageUrl(observation.provider_url);
+                      const providerName = observation.provider_id === "gdelt" ? "GDELT" : observation.provider_id;
+                      return <div key={`${observation.provider_id}-${observation.retrieved_at}-${index}`}>
+                        <p><strong>{providerName}</strong> · discovery provider</p>
+                        <dl className="news-story-meta"><div><dt>{providerName === "GDELT" ? "GDELT timestamp (seendate; meaning unverified)" : "Provider timestamp (meaning unverified)"}</dt><dd>{observation.provider_timestamp ? formatNewsTime(observation.provider_timestamp) : observation.provider_timestamp_raw ?? "Not reported"}</dd></div><div><dt>Provider record retrieved (UTC)</dt><dd>{formatNewsTime(observation.retrieved_at)}</dd></div>{observation.language ? <div><dt>Provider language label</dt><dd>{observation.language}</dd></div> : null}{observation.source_country ? <div><dt>Provider source-country label</dt><dd>{observation.source_country}; this does not establish incident location</dd></div> : null}</dl>
+                        {providerUrl ? <a className="news-story-link" href={providerUrl} target="_blank" rel="noopener noreferrer">View discovery provider<span className="sr-only">: {providerName} (opens in a new tab)</span></a> : null}
+                      </div>;
+                    })}
+                  </details> : null}
                   {isSyntheticRecord ? (
                     <details className="news-story-preview">
                       <summary>Read synthetic preview<span className="sr-only">: {article.headline}</span></summary>

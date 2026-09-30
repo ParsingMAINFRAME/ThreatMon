@@ -10,6 +10,7 @@
 - Separate news map with unique-story hotspots, explicit event versus spatial grouping, article coverage, time filters, and synthetic multi-publisher examples.
 - Bounded operator-only NASA news metadata ingestion with conditional caching and separate official/synthetic editions.
 - Real Global Voices article metadata with author/license attribution and GDACS hazard bulletins with source reference locations, distinct official-report counts, independent cache health and retained-publisher filters.
+- News-first routing, article-volume coverage-intensity bands, bounded GDELT metadata discovery and versioned conservative candidate associations; optional foreground polling with persisted state, not an activated service.
 - Operator CLI ingestion, stable identities, and material-change timelines.
 - Filtered/paginated read-only API and interactive Next.js console.
 - Local vector world atlas with cited USGS points, explicit illustrative demo markers, and unlocated-record handling.
@@ -19,9 +20,9 @@
 
 ## Next useful milestones
 
-1. Add feed refresh schedules and fetch-health history. The overview already shows the latest fetch outcome, last successful retrieval, and an explicit 24-hour stale-data indicator.
+1. Validate an explicitly authorized deployed refresh worker over repeated successful fetches. The optional foreground GDELT poller exists; no automatic service is active. Preserve fetch-health history and stale-data indicators.
 2. Broaden permitted world-news publisher coverage beyond Global Voices, with reviewed event associations and defensible article geography. GDACS provides official hazard bulletins; NASA remains space/science coverage.
-3. Add cross-source event grouping with explainable match rules and analyst overrides.
+3. Add analyst review and defensible incident-location evidence to the conservative candidate groups. DOC headline place references remain unlocated; never replace missing evidence with a capital or GEO mention point.
 4. Add watchlists and source-backed exposure inputs.
 5. Add analyst notes and review states, followed by authentication and access controls.
 6. Add alert delivery only after refresh, deduplication, and stale-source behavior are defined.

@@ -7,7 +7,7 @@ import math
 import re
 from urllib.parse import parse_qs, urlsplit
 
-from app.news.models import NewsArticle, NewsEvent, NewsLocation
+from app.news.models import NewsArticle, NewsEvent, NewsLocation, NewsObservation
 from app.news.service import NewsError, _plain_text, _rss_items
 from app.news.urls import ArticleCandidate, canonical_url, deduplicate_articles
 
@@ -58,6 +58,7 @@ def parse_globalvoices_feed(body: bytes, *, retrieved_at: datetime) -> tuple[lis
         article = NewsArticle(id=f"globalvoices-article-{identity}", canonical_url=url, headline=headline,
                               publisher="Global Voices", source_id="globalvoices", publisher_id="globalvoices",
                               author=author, license_url=GV_LICENSE, published_at=published, retrieved_at=retrieved_at,
+                              observations=[NewsObservation(provider_id="globalvoices", provider_url="https://globalvoices.org/feed/", retrieved_at=retrieved_at)],
                               summary="Global Voices published this article. Consult the original source for its full context.",
                               is_demo=False)
         candidates.append(ArticleCandidate(article))
@@ -100,6 +101,7 @@ def parse_gdacs_feed(body: bytes, *, retrieved_at: datetime) -> tuple[list[NewsE
                               publisher="GDACS", publisher_id="gdacs", source_id="gdacs", record_kind="official_report",
                               license_url="https://commission.europa.eu/legal-notice_en", published_at=published,
                               retrieved_at=retrieved_at, summary=summary, is_demo=False,
+                              observations=[NewsObservation(provider_id="gdacs", provider_url="https://www.gdacs.org/xml/rss.xml", retrieved_at=retrieved_at)],
                               source_window_start=_date(start) if start else None,
                               source_window_end=_date(end) if end else None)
         location = None

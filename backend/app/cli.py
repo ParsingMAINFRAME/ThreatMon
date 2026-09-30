@@ -15,6 +15,17 @@ from app.domain.ingestion.registry import registry
 from app.domain.ingestion.service import ingest_connector
 
 
+def _print_news_result(result) -> None:
+    records = [article for event in result.events for article in event.articles]
+    print(json.dumps({"edition": result.edition, "fetch_state": result.fetch_state,
+                      "events": len(result.events), "articles": sum(article.record_kind == "article" for article in records),
+                      "official_reports": sum(article.record_kind == "official_report" for article in records),
+                      "fetched_at": result.fetched_at.isoformat() if result.fetched_at else None,
+                      "last_attempt_at": result.last_attempt_at.isoformat() if result.last_attempt_at else None,
+                      "duplicates_excluded": result.duplicates_excluded, "error": result.error,
+                      "sources": [source.model_dump(mode="json") for source in result.sources]}), flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -26,19 +37,33 @@ def main(argv: list[str] | None = None) -> int:
     news_commands = news.add_subparsers(dest="news_command", required=True)
     news_ingest = news_commands.add_parser("ingest", help="Fetch or revalidate independent public RSS snapshots")
     news_ingest.add_argument("--cache-path", type=Path, help="NASA cache path; other feeds use deterministic sibling files")
-    news_ingest.add_argument("--source", choices=["all", "globalvoices", "gdacs", "nasa"], default="all")
+    news_ingest.add_argument("--source", choices=["all", "globalvoices", "gdelt", "gdacs", "nasa"], default="all")
+    news_poll = news_commands.add_parser("poll", help="Explicitly run one GDELT polling queue; never starts with the HTTP app")
+    news_poll.add_argument("--source", choices=["gdelt"], default="gdelt")
+    news_poll.add_argument("--cache-path", type=Path)
+    news_poll.add_argument("--interval-seconds", type=int, help="900–86400; defaults to NEWS_POLL_INTERVAL_SECONDS")
     args = parser.parse_args(argv)
     if args.command == "news":
         from app.news.service import ingest_sources
-        result = asyncio.run(ingest_sources(args.cache_path or Path(get_settings().news_snapshot_path), source=args.source))
-        records = [article for event in result.events for article in event.articles]
-        print(json.dumps({"edition": result.edition, "fetch_state": result.fetch_state,
-                          "events": len(result.events), "articles": sum(article.record_kind == "article" for article in records),
-                          "official_reports": sum(article.record_kind == "official_report" for article in records),
-                          "fetched_at": result.fetched_at.isoformat() if result.fetched_at else None,
-                          "last_attempt_at": result.last_attempt_at.isoformat() if result.last_attempt_at else None,
-                          "duplicates_excluded": result.duplicates_excluded, "error": result.error,
-                          "sources": [source.model_dump(mode="json") for source in result.sources]}))
+        from app.news.polling import NewsLockError, news_lock, poll_news
+        path = args.cache_path or Path(get_settings().news_snapshot_path)
+        interval = getattr(args, "interval_seconds", None)
+        if args.news_command == "poll":
+            interval = interval if interval is not None else get_settings().news_poll_interval_seconds
+            if not 900 <= interval <= 86400:
+                parser.error("--interval-seconds must be between 900 and 86400")
+        try:
+            with news_lock(path):
+                if args.news_command == "poll":
+                    asyncio.run(poll_news(path, interval_seconds=interval, on_result=_print_news_result))
+                    return 0
+                result = asyncio.run(ingest_sources(path, source=args.source))
+        except NewsLockError as error:
+            print(json.dumps({"error": str(error)}))
+            return 1
+        except KeyboardInterrupt:
+            return 130
+        _print_news_result(result)
         selected = result.sources if args.source == "all" else [source for source in result.sources if source.source_id == args.source]
         return 1 if any(source.state == "error" for source in selected) else 0
     if args.fixture is not None and args.connector == "all":

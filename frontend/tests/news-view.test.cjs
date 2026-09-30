@@ -9,11 +9,36 @@ const loadedModule = { exports: {} };
 const source = readFileSync(path.join(__dirname, '../src/lib/news-view.ts'), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 vm.runInNewContext(compiled, { exports: loadedModule.exports, module: loadedModule, URL, URLSearchParams, Intl });
-const { deduplicateNewsArticles, buildNewsEvents, clusterNewsEvents, parseNewsState, newsHref, selectNewsEvents, newsCoverage, formatNewsTime, newsPublisherId, newsSources } = loadedModule.exports;
+const { deduplicateNewsArticles, buildNewsEvents, clusterNewsEvents, parseNewsState, newsHref, selectNewsEvents, newsCoverage, formatNewsTime, newsPublisherId, newsSources, coverageIntensity, COVERAGE_INTENSITY_BANDS } = loadedModule.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
 const AS_OF = '2026-09-30T12:00:00Z';
 const article = (id, overrides = {}) => ({ id, canonical_url: null, headline: `Synthetic story ${id}`, publisher: 'Demo Publisher', published_at: '2026-09-30T11:30:00Z', retrieved_at: AS_OF, summary: 'Synthetic scenario.', is_demo: true, syndication_key: null, duplicate_urls: [], ...overrides });
 const event = (id, articles, overrides = {}) => ({ id, title: `DEMO event ${id}`, summary: 'Synthetic event, not a real report.', category: 'demonstration', status: 'unconfirmed', severity: 'unknown', severity_basis: 'No severity assessed.', grouping_basis: 'Explicit fixture association.', location: { lat: 35, lon: 51, label: 'Illustrative demo area', precision: 'illustrative', confidence: 'low', basis: 'Synthetic location.' }, scope: 'located', is_demo: true, articles, ...overrides });
+
+test('coverage intensity uses explicit inclusive article-count boundaries', () => {
+  for (const [count, expected] of [[1, 'green'], [5, 'green'], [10, 'green'], [11, 'amber'], [30, 'amber'], [31, 'red'], [35, 'red'], [1000, 'red']]) {
+    assert.equal(coverageIntensity(count), expected, `Collected article count ${count}`);
+  }
+  for (const invalid of [0, -1, 1.5, NaN, Infinity]) assert.equal(coverageIntensity(invalid), 'none');
+  assert.deepEqual(plain(COVERAGE_INTENSITY_BANDS.map(band => ({ intensity: band.intensity, label: band.label }))), [
+    { intensity: 'green', label: '1–10 collected articles' },
+    { intensity: 'amber', label: '11–30 collected articles' },
+    { intensity: 'red', label: '31+ collected articles' },
+  ]);
+});
+
+test('coverage intensity follows filtered unique articles independently of severity and official reports', () => {
+  const articles = Array.from({ length: 35 }, (_, index) => article(`volume-${index}`, { publisher_id: index < 5 ? 'selected' : 'other', is_demo: false }));
+  const input = event('volume', [...articles, article('official', { record_kind: 'official_report', publisher_id: 'gdacs', is_demo: false })], { severity: 'low' });
+  const all = buildNewsEvents([input], AS_OF, '24h')[0];
+  const selected = buildNewsEvents([input], AS_OF, '24h', 'selected')[0];
+  const official = buildNewsEvents([input], AS_OF, '24h', 'gdacs')[0];
+  assert.equal(coverageIntensity(all.story_count), 'red');
+  assert.equal(coverageIntensity(selected.story_count), 'green');
+  assert.equal(coverageIntensity(official.story_count), 'none');
+  assert.equal(all.severity, 'low');
+  assert.equal(selected.severity, 'low');
+});
 
 test('counts 35 unique stories and five stories separately without changing assessed severity', () => {
   const events = buildNewsEvents([
@@ -198,4 +223,42 @@ test('per-source health stays independent of aggregate snapshot success', () => 
   const legacy = newsSources({ edition: 'snapshot', events: [], fetched_at: AS_OF, last_attempt_at: AS_OF, fetch_state: 'ok', error: null, source_note: 'Legacy NASA cache' });
   assert.equal(legacy[0].source_id, 'nasa');
   assert.equal(legacy[0].last_success_at, AS_OF);
+});
+
+test('unknown publication uses first collection for the window without manufacturing a publication time', () => {
+  const views = buildNewsEvents([event('discovered', [
+    article('discovered-now', { published_at: null, first_seen_at: '2026-09-30T11:40:00Z', is_demo: false, publisher_id: 'example.org', publisher: 'example.org', source_id: 'gdelt' }),
+    article('discovered-old', { published_at: null, first_seen_at: '2026-09-28T12:00:00Z' }),
+    article('time-unknown', { published_at: null, first_seen_at: null }),
+    article('future-discovery', { published_at: null, first_seen_at: '2026-09-30T13:00:00Z' }),
+  ], { scope: 'unlocated', location: null, grouping_status: 'candidate', place_hints: ['Unverified city mention'] })], AS_OF, '1h');
+  assert.equal(views[0].story_count, 1);
+  assert.equal(views[0].freshest_published_at, null);
+  assert.equal(views[0].freshest_collected_at, '2026-09-30T11:40:00Z');
+  assert.equal(views[0].articles[0].published_at, null);
+  assert.equal(clusterNewsEvents(views, 1).length, 0);
+});
+
+test('known publication takes precedence over recent first collection', () => {
+  const views = buildNewsEvents([event('old-publication', [article('old', { published_at: '2026-09-28T12:00:00Z', first_seen_at: AS_OF })])], AS_OF, '24h');
+  assert.equal(views.length, 0);
+});
+
+test('discovery providers do not become publishers or duplicate collected articles', () => {
+  const observations = [{ provider_id: 'gdelt', provider_url: 'https://api.gdeltproject.org/', provider_timestamp: AS_OF, retrieved_at: AS_OF, language: 'English', source_country: 'Example' }];
+  const views = buildNewsEvents([event('candidate', [
+    article('a', { canonical_url: 'https://publisher.example/article', publisher_id: 'publisher.example', publisher: 'publisher.example', observations, is_demo: false }),
+    article('duplicate', { canonical_url: 'https://publisher.example/article', publisher_id: 'publisher.example', publisher: 'Publisher Example', observations: [...observations, { ...observations[0], provider_timestamp: '2026-09-30T11:00:00Z' }], is_demo: false }),
+  ], { grouping_status: 'candidate' })], AS_OF, '24h');
+  assert.equal(views[0].story_count, 1);
+  assert.equal(views[0].news_publisher_count, 1);
+  assert.equal(views[0].grouping_status, 'candidate');
+});
+
+test('bulletin channel URLs retain filters and edition on the secondary route', () => {
+  const state = parseNewsState(new URLSearchParams('publisher=gdacs&window=7d&scope=located&selected=report'));
+  const href = newsHref(state, 'snapshot', 'signals');
+  assert.ok(href.startsWith('/signals?view=bulletins&edition=snapshot'));
+  assert.deepEqual(plain(parseNewsState(new URLSearchParams(href.split('?')[1]))), plain(state));
+  assert.ok(newsHref(state, 'snapshot', 'news').startsWith('/?edition=snapshot'));
 });

@@ -1,12 +1,14 @@
 export type NewsSeverity = "unknown" | "low" | "moderate" | "high";
 export type NewsScope = "located" | "global" | "unlocated";
 export type NewsWindow = "1h" | "24h" | "7d" | "all";
+export type NewsCoverageIntensity = "none" | "green" | "amber" | "red";
+export type NewsChannel = "news" | "signals" | "all";
 
 export type NewsSourceStatus = {
   source_id: string;
   publisher_id: string;
   name: string;
-  kind: "news" | "official";
+  kind: "news" | "official" | "discovery";
   feed_url: string;
   terms_url: string;
   attribution: string;
@@ -17,6 +19,21 @@ export type NewsSourceStatus = {
   error: string | null;
   item_count: number;
   next_fetch_at: string | null;
+  query_window_start?: string | null;
+  query_window_end?: string | null;
+  result_limit?: number | null;
+  possibly_truncated?: boolean;
+  query?: string | null;
+};
+
+export type NewsObservation = {
+  provider_id: string;
+  provider_url: string;
+  provider_timestamp: string | null;
+  provider_timestamp_raw?: string | null;
+  retrieved_at: string;
+  language: string | null;
+  source_country: string | null;
 };
 
 export type NewsLocation = {
@@ -34,7 +51,9 @@ export type NewsArticle = {
   canonical_url: string | null;
   headline: string;
   publisher: string;
-  published_at: string;
+  published_at: string | null;
+  first_seen_at?: string | null;
+  observations?: NewsObservation[];
   retrieved_at: string;
   summary: string;
   is_demo: boolean;
@@ -64,6 +83,10 @@ export type NewsEvent = {
   articles: NewsArticle[];
   source_event_id?: string | null;
   source_alert_level?: string | null;
+  grouping_status?: "source_event" | "single_source" | "candidate";
+  grouping_version?: string | null;
+  assignment_revision?: string | null;
+  place_hints?: string[];
 };
 
 export type NewsResponse = {
@@ -77,6 +100,7 @@ export type NewsResponse = {
   duplicates_excluded: number;
   source_note: string;
   sources?: NewsSourceStatus[];
+  channel?: NewsChannel;
 };
 
 export type NewsEventView = NewsEvent & {
@@ -86,6 +110,7 @@ export type NewsEventView = NewsEvent & {
   news_publisher_count: number;
   official_source_count: number;
   freshest_published_at: string | null;
+  freshest_collected_at: string | null;
   last_retrieved_at: string | null;
 };
 

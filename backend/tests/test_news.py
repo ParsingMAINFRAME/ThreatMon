@@ -203,7 +203,7 @@ def test_news_api_is_read_only_and_editions_cannot_mix(tmp_path, monkeypatch):
         assert client.post("/news").status_code == 405
 
 
-def test_bare_news_api_returns_stored_publications_without_demo_fallback(tmp_path, monkeypatch):
+def test_bare_news_api_excludes_signal_sources_and_never_falls_back_to_demo(tmp_path, monkeypatch):
     from app.core.config import get_settings
     from app.news.routes import router
     path = tmp_path / "news.json"
@@ -213,12 +213,15 @@ def test_bare_news_api_returns_stored_publications_without_demo_fallback(tmp_pat
     app.include_router(router)
     with TestClient(app) as client:
         response = client.get("/news")
+        signals = client.get("/news?channel=signals")
+        assert client.get("/news?channel=unknown").status_code == 422
     assert response.status_code == 200
     body = response.json()
-    assert body["edition"] == "snapshot" and body["fetch_state"] == "partial"
-    assert [event["id"] for event in body["events"]] == [event.id for event in stored.events]
-    assert all(not event["is_demo"] for event in body["events"])
-    assert {source["source_id"] for source in body["sources"]} == {"nasa", "globalvoices", "gdacs"}
+    assert body["edition"] == "snapshot" and body["fetch_state"] == "never_fetched"
+    assert body["events"] == [] and body["channel"] == "news"
+    assert {source["source_id"] for source in body["sources"]} == {"globalvoices", "gdelt"}
+    assert [event["id"] for event in signals.json()["events"]] == [event.id for event in stored.events]
+    assert all(not event["is_demo"] for event in signals.json()["events"])
 
 
 def test_utf16_entity_declaration_and_timezone_free_or_future_dates_rejected():

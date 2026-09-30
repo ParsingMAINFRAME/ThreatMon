@@ -1,0 +1,209 @@
+"""Synthetic headlines test grouping policy; none are imported as actual news."""
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from app.news.grouping import GROUPING_VERSION, group_candidate_events
+from app.news.models import NewsArticle, NewsObservation
+
+
+NOW = datetime(2026, 9, 30, 12, tzinfo=UTC)
+FIRST = "Explosion at Orion chemical plant in Tehran"
+SECOND = "Tehran blast damages Orion chemical facility"
+
+
+def article(identity, headline=FIRST, *, publisher=None, hours=0, published=True, observed=True):
+    publisher = publisher or f"publisher-{identity}.example"
+    return NewsArticle(
+        id=identity, canonical_url=f"https://{publisher}/{identity}", headline=headline,
+        publisher=publisher, publisher_id=publisher, source_id="gdelt", record_kind="article",
+        published_at=NOW + timedelta(hours=hours) if published else None,
+        first_seen_at=NOW + timedelta(hours=hours) if observed else None,
+        retrieved_at=NOW + timedelta(days=2), summary="Synthetic test metadata.", is_demo=False,
+    )
+
+
+def test_compatible_cross_publisher_headlines_form_unlocated_candidate():
+    records = [article("a"), article("b", SECOND)]
+    before = [item.model_dump() for item in records]
+    events = group_candidate_events(records)
+    assert len(events) == 1
+    event = events[0]
+    assert event.grouping_status == "candidate"
+    assert event.grouping_version == GROUPING_VERSION
+    assert event.assignment_revision
+    assert event.place_hints == ["Tehran"]
+    assert event.location is None and event.scope == "unlocated"
+    assert event.severity == "unknown" and event.status == "unconfirmed"
+    assert {item.id for item in event.articles} == {"a", "b"}
+    assert "independent confirmation" in event.grouping_basis.lower()
+    assert [item.model_dump() for item in records] == before
+
+
+@pytest.mark.parametrize("first,second", [
+    ("Explosion at Orion chemical plant in Iran", "Iran blast damages Orion chemical facility"),
+    ("Explosion at Orion chemical plant", "Blast damages Orion chemical facility"),
+    (FIRST, "Tehran blast damages Atlas storage depot"),
+    (FIRST, "Fire at Orion chemical plant in Tehran"),
+    (FIRST, "Explosion at Orion chemical plant in Beirut"),
+    (FIRST, "Tehran and Beirut report Orion chemical plant explosion"),
+    (FIRST, "Anniversary of Orion chemical plant explosion in Tehran"),
+    ("Explosion at Orion chemical plant in Unknownville", "Unknownville blast damages Orion chemical plant"),
+    ("Explosion at Orion chemical plant in Tripoli", "Tripoli blast damages Orion chemical facility"),
+    ("Explosion at Orion chemical plant in Paris, France", "Paris, Texas blast damages Orion chemical facility"),
+])
+def test_weak_ambiguous_or_conflicting_location_type_and_entity_clues_do_not_join(first, second):
+    events = group_candidate_events([article("a", first), article("b", second)])
+    assert len(events) == 2
+    assert all(event.grouping_status == "single_source" for event in events)
+    assert all(event.location is None for event in events)
+
+
+@pytest.mark.parametrize("first_date,second_date", [
+    ("on 2026-09-29", "on 2026-09-30"),
+    ("on September 29", "on September 30"),
+    ("on Tuesday", "on Wednesday"),
+    ("in 2025", "in 2026"),
+])
+def test_conflicting_explicit_dates_are_not_related(first_date, second_date):
+    assert len(group_candidate_events([
+        article("a", f"{FIRST} {first_date}"), article("b", f"{SECOND} {second_date}"),
+    ])) == 2
+
+
+def test_different_spellings_of_same_date_and_explicit_tripoli_country_can_match():
+    events = group_candidate_events([
+        article("a", "Explosion at Orion chemical plant in Tripoli, Libya on September 30"),
+        article("b", "Tripoli, Libya blast damages Orion chemical facility on 30 September"),
+    ])
+    assert len(events) == 1 and events[0].place_hints == ["Tripoli, Libya"]
+
+
+def test_conflicting_tripoli_countries_are_not_related():
+    assert len(group_candidate_events([
+        article("a", "Explosion at Orion chemical plant in Tripoli, Libya"),
+        article("b", "Tripoli, Lebanon blast damages Orion chemical facility"),
+    ])) == 2
+
+
+def test_time_limit_and_complete_link_prevent_transitive_chaining():
+    events = group_candidate_events([article("a", hours=0), article("b", SECOND, hours=20), article("c", hours=40)])
+    assert sorted(len(event.articles) for event in events) == [1, 2]
+    assert {item.id for event in events for item in event.articles} == {"a", "b", "c"}
+    assert len(group_candidate_events([article("a"), article("b", SECOND, hours=24)])) == 1
+    assert len(group_candidate_events([article("a"), article("b", SECOND, hours=24.01)])) == 2
+
+
+def test_collection_time_is_an_explicit_heuristic_without_inventing_publication():
+    events = group_candidate_events([article("a", published=False), article("b", SECOND, published=False)])
+    assert len(events) == 1
+    assert all(item.published_at is None for item in events[0].articles)
+    assert "collection times are only heuristics" in events[0].grouping_basis.lower()
+    assert len(group_candidate_events([
+        article("a", published=False).model_copy(update={"first_seen_at": None}),
+        article("b", SECOND, published=False).model_copy(update={"first_seen_at": None}),
+    ])) == 2  # Retrieval time alone is not evidence that two reports concern the same recent event.
+
+
+def test_multiple_reports_from_one_publisher_do_not_create_cross_publisher_candidate():
+    events = group_candidate_events([article("a", publisher="one.example"), article("b", SECOND, publisher="one.example")])
+    assert len(events) == 2 and all(len(event.articles) == 1 for event in events)
+
+
+def test_equal_headlines_keep_collected_links_but_never_claim_independent_confirmation():
+    event = group_candidate_events([article("a"), article("b")])[0]
+    assert len(event.articles) == 2
+    assert len({item.canonical_url for item in event.articles}) == 2
+    assert "shared copy" in event.grouping_basis.lower()
+    assert "not independent confirmation" in event.grouping_basis.lower()
+
+
+def test_canonical_identity_boundaries_and_empty_input():
+    first = article("a")
+    assert len(group_candidate_events([first, first.model_copy(deep=True)])) == 1
+    with pytest.raises(ValueError, match="identity"):
+        group_candidate_events([first, article("a", SECOND)])
+    with pytest.raises(ValueError, match="canonical"):
+        group_candidate_events([first, first.model_copy(update={"id": "b"})])
+    assert group_candidate_events([]) == []
+
+
+def test_only_actual_publisher_articles_are_grouped():
+    with pytest.raises(ValueError, match="publisher articles"):
+        group_candidate_events([article("a").model_copy(update={"record_kind": "official_report"})])
+    with pytest.raises(ValueError, match="publisher articles"):
+        group_candidate_events([article("a").model_copy(update={"is_demo": True})])
+
+
+def test_assignments_are_order_independent_and_revision_tracks_evidence():
+    records = [article("a"), article("b", SECOND), article("c", "A separate publication")]
+    first = group_candidate_events(records)
+    reversed_events = group_candidate_events(list(reversed(records)))
+    assert [item.model_dump() for item in first] == [item.model_dump() for item in reversed_events]
+    grouped = next(event for event in first if event.grouping_status == "candidate")
+    changed = group_candidate_events([article("a"), article("b", SECOND + " after evacuation")])
+    assert changed[0].assignment_revision != grouped.assignment_revision
+
+
+def test_previous_candidate_identity_survives_growth_but_not_incompatible_merger():
+    previous = group_candidate_events([article("a"), article("b", SECOND)])
+    current = group_candidate_events([article("a"), article("b", SECOND), article("c", FIRST)], previous_events=previous)
+    assert current[0].id == previous[0].id
+    assert current[0].assignment_revision != previous[0].assignment_revision
+    # A previous assignment never overrides today's explicit geographic contradiction.
+    split = group_candidate_events([article("a"), article("b", SECOND.replace("Tehran", "Beirut"))], previous_events=previous)
+    assert len(split) == 2 and all(event.grouping_status == "single_source" for event in split)
+
+
+def test_input_and_event_bounds_preserve_union_without_overlong_groups():
+    records = [article(str(index)) for index in range(260)]
+    events = group_candidate_events(records)
+    assert sorted(len(event.articles) for event in events) == [10, 250]
+    assert sum(len(event.articles) for event in events) == 260
+    assert len({item.id for event in events for item in event.articles}) == 260
+    assert len(group_candidate_events(records[:250])[0].articles) == 250
+
+
+def observation(*, hours=0, language="English", country="France"):
+    return NewsObservation(provider_id="gdelt", provider_url="https://api.gdeltproject.org/api/v2/doc/doc",
+                           provider_timestamp=NOW + timedelta(hours=hours), retrieved_at=NOW + timedelta(days=2),
+                           provider_timestamp_raw=(NOW + timedelta(hours=hours)).isoformat(),
+                           language=language, source_country=country)
+
+
+def test_provider_clock_is_only_a_window_heuristic_and_source_country_is_not_incident_geography():
+    first = article("a", published=False).model_copy(update={"observations": [observation(country="France")]})
+    second = article("b", SECOND, published=False).model_copy(update={"observations": [observation(country="Germany")]})
+    event = group_candidate_events([first, second])[0]
+    assert len(event.articles) == 2 and event.place_hints == ["Tehran"]
+    assert event.location is None
+    assert "provider and collection times are only heuristics" in event.grouping_basis.lower()
+    later = second.model_copy(update={"observations": [observation(hours=25)]})
+    assert len(group_candidate_events([first, later])) == 2
+
+
+def test_conflicting_provider_clocks_or_non_english_metadata_prevent_heuristic_association():
+    first = article("a", published=False).model_copy(update={"observations": [observation(), observation(hours=25)]})
+    assert len(group_candidate_events([first, article("b", SECOND)])) == 2
+    foreign = article("a").model_copy(update={"observations": [observation(language="Spanish")]})
+    assert len(group_candidate_events([foreign, article("b", SECOND)])) == 2
+
+
+def test_country_adjectives_or_generic_institutions_are_not_distinctive_entity_clues():
+    for headline in (
+        "Explosion damages Iranian chemical facility in Tehran",
+        "Explosion damages Government chemical facility in Tehran",
+    ):
+        assert len(group_candidate_events([article("a", headline), article("b", headline)])) == 2
+
+
+def test_prior_algorithm_version_cannot_reuse_an_old_assignment_identity():
+    records = [article("a"), article("b", SECOND)]
+    previous = group_candidate_events(records)[0].model_copy(update={"id": "old-version-id", "grouping_version": "obsolete"})
+    assert group_candidate_events(records, previous_events=[previous])[0].id != "old-version-id"
+
+
+def test_input_bound_rejects_unbounded_computation_before_processing_articles():
+    with pytest.raises(ValueError, match="1000 article bound"):
+        group_candidate_events([article("a")] * 1001)

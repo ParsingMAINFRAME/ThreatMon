@@ -6,7 +6,7 @@ import { CoveragePanel } from "./CoveragePanel";
 import { NewsMap } from "./NewsMap";
 import type { NewsResponse, NewsViewState, NewsWindow } from "@/lib/news-types";
 import { assessConnectorFreshness } from "@/lib/freshness";
-import { buildNewsEvents, formatNewsTime, humanizeNewsLabel, newsCoverage, newsHref, newsPublisherId, newsSources, parseNewsState, selectNewsEvents } from "@/lib/news-view";
+import { buildNewsEvents, coverageIntensity, formatNewsTime, humanizeNewsLabel, newsCoverage, newsHref, newsPublisherId, newsSources, parseNewsState, selectNewsEvents } from "@/lib/news-view";
 import "@/app/news.css";
 
 const STATE_EVENT = "threatmon-news-state";
@@ -35,6 +35,8 @@ function safeSourceUrl(value: string): string | null {
 }
 
 export function NewsMonitor({ data }: { data: NewsResponse }) {
+  const channel = data.channel ?? "news";
+  const isSignals = channel === "signals";
   const search = useSyncExternalStore(subscribeLocation, locationSearch, serverSearch);
   const state = useMemo(() => parseNewsState(new URLSearchParams(search)), [search]);
   const events = useMemo(() => buildNewsEvents(data.events, data.as_of, state.window, state.publisherId), [data.events, data.as_of, state.window, state.publisherId]);
@@ -54,7 +56,7 @@ export function NewsMonitor({ data }: { data: NewsResponse }) {
     item_count: source.item_count, error: source.error,
   }, Date.parse(data.as_of)) })), [sources, data.as_of]);
   const publisherOptions = useMemo(() => {
-    const publishers = new Map(sources.map((source) => [source.publisher_id, source.name]));
+    const publishers = new Map(sources.filter((source) => source.kind !== "discovery").map((source) => [source.publisher_id, source.name]));
     for (const event of data.events) for (const article of event.articles) {
       const id = newsPublisherId(article);
       if (!publishers.has(id)) publishers.set(id, article.publisher);
@@ -65,16 +67,17 @@ export function NewsMonitor({ data }: { data: NewsResponse }) {
   const failedSources = sourceHealth.filter(({ source }) => source.state === "error").length;
   const staleSources = sourceHealth.filter(({ freshness }) => freshness.ageState === "stale").length;
   const unfetchedSources = sourceHealth.filter(({ freshness }) => freshness.ageState === "never_fetched").length;
+  const cappedSources = sources.filter((source) => source.possibly_truncated).length;
 
   const updateState = useCallback((patch: Partial<NewsViewState>, replace = false) => {
     const next = { ...state, ...patch };
     const available = selectNewsEvents(buildNewsEvents(data.events, data.as_of, next.window, next.publisherId), next);
     if (next.selectedId && !available.some((event) => event.id === next.selectedId)) next.selectedId = null;
-    const href = newsHref(next, data.edition);
+    const href = newsHref(next, data.edition, channel);
     if (replace) window.history.replaceState(window.history.state, "", href);
     else window.history.pushState(window.history.state, "", href);
     window.dispatchEvent(new Event(STATE_EVENT));
-  }, [state, data.events, data.as_of, data.edition]);
+  }, [state, data.events, data.as_of, data.edition, channel]);
 
   function selectEvent(id: string) {
     updateState({ selectedId: id });
@@ -86,10 +89,10 @@ export function NewsMonitor({ data }: { data: NewsResponse }) {
 
   return <div className="news-monitor">
     <header className="news-heading">
-      <div><p className="news-eyebrow">Public reporting / Geographic coverage</p><h1>World news monitor</h1><p className="news-heading-note">Explore event coverage, sources and uncertainty.</p></div>
+      <div><p className="news-eyebrow">{isSignals ? "Secondary source records" : "Collected journalism / Incident coverage"}</p><h1>{isSignals ? "Source bulletins" : "Incident news"}</h1><p className="news-heading-note">{isSignals ? "Official hazard reports and space updates, separate from the news collection." : "Explore collected articles, candidate associations and publisher coverage."}</p></div>
       <nav className="news-edition-switch" aria-label="News edition">
-        <Link href={newsHref({ ...state, selectedId: isDemo ? state.selectedId : null, publisherId: isDemo ? state.publisherId : null }, "demo")} aria-current={isDemo ? "page" : undefined}>Demo scenarios</Link>
-        <Link href={newsHref({ ...state, selectedId: isDemo ? null : state.selectedId, publisherId: isDemo ? null : state.publisherId }, "snapshot")} aria-current={!isDemo ? "page" : undefined}>Fetched coverage</Link>
+        <Link href={newsHref({ ...state, selectedId: isDemo ? state.selectedId : null, publisherId: isDemo ? state.publisherId : null }, "demo", "news")} aria-current={isDemo ? "page" : undefined}>Demo scenarios</Link>
+        <Link href={newsHref({ ...state, selectedId: isDemo ? null : state.selectedId, publisherId: isDemo ? null : state.publisherId }, "snapshot", channel)} aria-current={!isDemo ? "page" : undefined}>{isSignals ? "Fetched bulletins" : "Fetched news"}</Link>
       </nav>
     </header>
 
@@ -98,20 +101,20 @@ export function NewsMonitor({ data }: { data: NewsResponse }) {
       <p>Fictional events, publishers and stories. Iran and all map positions are illustrative; this edition reports no real incidents.</p>
       <p className="news-demo-clock">Fixed demo clock: <time dateTime={data.as_of}>{formatNewsTime(data.as_of)}</time></p>
     </aside> : <aside className="news-edition-notice news-edition-snapshot" aria-label="Snapshot source note">
-      <strong>FETCHED COVERAGE — REAL SOURCE RECORDS</strong>
-      <p>Publisher articles and official hazard reports, kept distinct. Imports are manual; page refresh reads stored coverage. Source attribution does not imply endorsement or confirmed impact.</p>
-      <p className="news-demo-clock">Edition as of: <time dateTime={data.as_of}>{formatNewsTime(data.as_of)}</time>. Publication windows end at this clock.</p>
+      <strong>{isSignals ? "OFFICIAL BULLETINS — SECONDARY SOURCE VIEW" : "FETCHED NEWS — COLLECTED ARTICLE SAMPLE"}</strong>
+      <p>{isSignals ? "Official hazard reports and space updates. Source-model alerts are not confirmed impact." : "Publisher articles and discovery-provider results. Candidate associations are unverified; collected counts are not total worldwide coverage."} Imports are manual; page refresh reads stored records.</p>
+      <p className="news-demo-clock">Edition as of: <time dateTime={data.as_of}>{formatNewsTime(data.as_of)}</time>. {isSignals ? "Publication" : "Publication or first-collection"} windows end at this clock.</p>
     </aside>}
 
     <details className="news-sources" open={Boolean(state.publisherId)}>
-      <summary><span>{isDemo ? "Demo publishers" : "Sources and freshness"}{state.publisherId ? " · publisher filter active" : ""}</span>{!isDemo ? <span>{recentSources}/{sources.length} fetched within 24h{failedSources ? ` · ${failedSources} failed` : ""}{staleSources ? ` · ${staleSources} stale` : ""}{unfetchedSources ? ` · ${unfetchedSources} never fetched` : ""}</span> : null}</summary>
+      <summary><span>{isDemo ? "Demo publishers" : "Sources and freshness"}{state.publisherId ? " · publisher filter active" : ""}</span>{!isDemo ? <span>{recentSources}/{sources.length} fetched within 24h{failedSources ? ` · ${failedSources} failed` : ""}{staleSources ? ` · ${staleSources} stale` : ""}{unfetchedSources ? ` · ${unfetchedSources} never fetched` : ""}{cappedSources ? ` · ${cappedSources} possibly capped` : ""}</span> : null}</summary>
       <div className="news-source-selection">
-        <label htmlFor="news-publisher"><span>Retained publisher or issuing agency</span><select id="news-publisher" value={state.publisherId ?? ""} onChange={(event) => updateState({ publisherId: event.target.value || null })}>
-          <option value="">All retained publishers and agencies</option>
+        <label htmlFor="news-publisher"><span>{isSignals ? "Retained publisher or issuing agency" : "Article publisher"}</span><select id="news-publisher" value={state.publisherId ?? ""} onChange={(event) => updateState({ publisherId: event.target.value || null })}>
+          <option value="">{isSignals ? "All retained publishers and agencies" : "All retained article publishers"}</option>
           {state.publisherId && !publisherOptions.some((option) => option.id === state.publisherId) ? <option value={state.publisherId}>Unavailable publisher selection</option> : null}
           {publisherOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
         </select></label>
-        <p>Counts reflect retained records from this selection. Syndicated copies excluded during import do not add publishers or articles.</p>
+        <p>Counts reflect retained records from this selection. Discovery providers are not publishers. Excluded syndicated copies do not add publishers or articles.</p>
       </div>
       {!isDemo ? <details className="news-source-provenance">
         <summary>Fetch history and source attribution</summary>
@@ -121,10 +124,13 @@ export function NewsMonitor({ data }: { data: NewsResponse }) {
           const termsUrl = safeSourceUrl(source.terms_url);
           const age = freshness.ageState === "stale" ? "Stale — over 24 hours" : freshness.ageState === "within_threshold" ? "Fetched within 24 hours" : freshness.ageState === "never_fetched" ? "Never fetched" : "Fetch age unknown";
           return <li key={source.source_id}>
-            <div className="news-source-heading"><strong>{source.name}</strong><span>{source.kind === "official" ? "Official reports" : "Publisher articles"} · {source.item_count} retained records</span></div>
+            <div className="news-source-heading"><strong>{source.name}</strong><span>{source.kind === "official" ? "Official reports" : source.kind === "discovery" ? "Discovery provider, not a publisher" : "Publisher articles"} · {source.item_count} retained records</span></div>
             <p className={source.state === "error" || freshness.ageState === "stale" ? "news-source-warning" : undefined}>{source.state === "error" ? "Latest fetch failed. " : ""}{age}{freshness.ageLabel ? ` (${freshness.ageLabel} at edition clock)` : ""}.</p>
             <dl><div><dt>Last successful fetch</dt><dd>{formatNewsTime(source.last_success_at)}</dd></div><div><dt>Last attempt</dt><dd>{formatNewsTime(source.last_attempt_at)}</dd></div>{source.next_fetch_at ? <div><dt>Next permitted import</dt><dd>{formatNewsTime(source.next_fetch_at)}; not an automatic schedule</dd></div> : null}</dl>
             {source.error ? <p className="news-source-warning">{source.error}</p> : null}
+            {source.query_window_start || source.query_window_end || source.result_limit ? <dl><div><dt>Latest provider query window</dt><dd>{formatNewsTime(source.query_window_start ?? null)} to {formatNewsTime(source.query_window_end ?? null)}</dd></div>{source.result_limit ? <div><dt>Provider result limit per query</dt><dd>{source.result_limit} records; not a total-coverage count</dd></div> : null}</dl> : null}
+            {source.query ? <dl><div><dt>Discovery query</dt><dd><code>{source.query}</code></dd></div></dl> : null}
+            {source.possibly_truncated ? <p className="news-source-warning">Collection limits or query-window gaps may omit coverage. This retained sample is incomplete.</p> : null}
             <p>{source.coverage_note}</p><p>{source.attribution}</p>
             <div className="news-source-links">{feedUrl ? <a href={feedUrl} target="_blank" rel="noopener noreferrer">Source feed<span className="sr-only">: {source.name} (opens in a new tab)</span></a> : null}{termsUrl ? <a href={termsUrl} target="_blank" rel="noopener noreferrer">Source terms<span className="sr-only">: {source.name} (opens in a new tab)</span></a> : null}</div>
           </li>;
@@ -136,13 +142,13 @@ export function NewsMonitor({ data }: { data: NewsResponse }) {
 
     <div className="news-controls" id="news-map-top">
       <label className="news-search"><span>Find an event or publisher</span><input type="search" value={state.query} onChange={(event) => updateState({ query: event.target.value }, true)} placeholder="Search topics, places or publishers" /></label>
-      <fieldset className="news-window"><legend>Published within</legend><div>{WINDOWS.map((option) => <button key={option.value} type="button" aria-pressed={state.window === option.value} onClick={() => updateState({ window: option.value })}>{option.label}</button>)}</div></fieldset>
+      <fieldset className="news-window"><legend>{isSignals ? "Published within" : "Published / first collected within"}</legend><div>{WINDOWS.map((option) => <button key={option.value} type="button" aria-pressed={state.window === option.value} onClick={() => updateState({ window: option.value })}>{option.label}</button>)}</div></fieldset>
     </div>
     <div className="news-scope-bar">
       <div className="news-scopes" role="group" aria-label="Geographic scope">{SCOPES.map((scope) => <button key={scope.value} type="button" aria-pressed={state.scope === scope.value} onClick={() => updateState({ scope: scope.value })}>{scope.label}<span>{scope.value === "all" ? queriedEvents.length : queriedEvents.filter((event) => event.scope === scope.value).length}</span></button>)}</div>
       {isFiltered ? <button className="news-clear" type="button" onClick={() => updateState({ window: "24h", scope: "all", query: "", selectedId: null, publisherId: null })}>Reset view</button> : null}
     </div>
-    <p className="news-results" role="status"><strong>{counts.event_count}</strong> {counts.event_count === 1 ? "event" : "events"} · <strong>{counts.story_count}</strong> {counts.story_count === 1 ? "article" : "articles"} from <strong>{counts.news_publisher_count}</strong> news {counts.news_publisher_count === 1 ? "publisher" : "publishers"} · <strong>{counts.official_report_count}</strong> official {counts.official_report_count === 1 ? "report" : "reports"} from <strong>{counts.official_source_count}</strong> {counts.official_source_count === 1 ? "agency" : "agencies"}. Counts reflect this view.</p>
+    <p className="news-results" role="status"><strong>{counts.event_count}</strong> {counts.event_count === 1 ? "event or report group" : "events and report groups"} · <strong>{counts.story_count}</strong> collected {counts.story_count === 1 ? "article" : "articles"} from <strong>{counts.news_publisher_count}</strong> {counts.news_publisher_count === 1 ? "publisher" : "publishers"}{isSignals ? <> · <strong>{counts.official_report_count}</strong> official {counts.official_report_count === 1 ? "report" : "reports"} from <strong>{counts.official_source_count}</strong> {counts.official_source_count === 1 ? "agency" : "agencies"}</> : null}. {isSignals ? "Counts reflect this view." : "A filtered, potentially capped sample—not all reporting worldwide."}</p>
 
     <div className="news-workspace">
       <div className="news-overview">
@@ -151,8 +157,8 @@ export function NewsMonitor({ data }: { data: NewsResponse }) {
           <header><h2 id="news-event-register-title">Events in this view</h2><span>Ordered by retained records, not severity</span></header>
           {visibleEvents.length ? <ol className="news-event-list">{visibleEvents.map((event) => <li key={event.id}>
             <button type="button" className={`news-event-card${event.id === selected?.id ? " is-selected" : ""}`} aria-pressed={event.id === selected?.id} onClick={() => selectEvent(event.id)}>
-              <span className={`news-event-count severity-${event.severity}${!event.story_count && event.official_report_count ? " is-official-report" : ""}`}><strong>{event.story_count || event.official_report_count}</strong><span>{event.story_count ? event.story_count === 1 ? "article" : "articles" : event.official_report_count === 1 ? "report" : "reports"}</span></span>
-              <span className="news-event-content"><span className="news-eyebrow">{event.is_demo ? "DEMO / " : ""}{!event.story_count && event.official_report_count ? "Official report / " : ""}{humanizeNewsLabel(event.category)} · {event.scope === "global" ? "Global coverage" : event.scope === "unlocated" ? "Unlocated" : event.location?.label}</span><strong>{event.title}</strong><span className="news-event-assessment">{humanizeNewsLabel(event.severity)} severity · {humanizeNewsLabel(event.status)}{event.story_count ? ` · ${event.news_publisher_count} news ${event.news_publisher_count === 1 ? "publisher" : "publishers"}` : ""}{event.official_report_count ? ` · ${event.official_report_count} official ${event.official_report_count === 1 ? "report" : "reports"} / ${event.official_source_count} ${event.official_source_count === 1 ? "agency" : "agencies"}` : ""}</span></span>
+              <span className={`news-event-count coverage-${coverageIntensity(event.story_count)}${!event.story_count && event.official_report_count ? " is-official-report" : ""}`}><strong>{event.story_count || event.official_report_count}</strong><span>{event.story_count ? event.story_count === 1 ? "article" : "articles" : event.official_report_count === 1 ? "report" : "reports"}</span></span>
+              <span className="news-event-content"><span className="news-eyebrow">{event.is_demo ? "DEMO / " : ""}{!event.story_count && event.official_report_count ? "Official report / " : ""}{humanizeNewsLabel(event.category)} · {event.scope === "global" ? "Global coverage" : event.scope === "unlocated" ? "Unlocated" : event.location?.label}</span>{event.grouping_status === "candidate" ? <span className="news-candidate-label">Candidate association · unverified</span> : null}<strong>{event.title}</strong><span className="news-event-assessment">{event.story_count ? `${event.news_publisher_count} article ${event.news_publisher_count === 1 ? "publisher" : "publishers"}` : ""}{event.official_report_count ? `${event.story_count ? " · " : ""}${event.official_report_count} official ${event.official_report_count === 1 ? "report" : "reports"} / ${event.official_source_count} ${event.official_source_count === 1 ? "agency" : "agencies"}` : ""}</span></span>
             </button>
           </li>)}</ol> : <p className="news-empty-list">No coverage records match these filters. Try a wider publication window or reset the view.</p>}
         </section>
@@ -162,7 +168,7 @@ export function NewsMonitor({ data }: { data: NewsResponse }) {
 
     <section id="news-method" className="news-method" aria-labelledby="news-method-title">
       <h2 id="news-method-title">How to read this monitor</h2>
-      <div><p><strong>Keep record types distinct.</strong> Circles count retained news articles; square markers count official reports. Neither count establishes severity or corroboration. Canonical aliases and declared syndication relationships are deduplicated; publisher breadth reflects only retained records.</p><p><strong>Group places, preserve incidents.</strong> A marker labeled “N separate events” opens a navigation group, not a merged incident. Publisher stories remain separate unless source evidence establishes event identity. Global and unlocated records receive no invented point; source-reported hazard coordinates link to their geographic evidence.</p><p><strong>Read the source clock.</strong> The window uses each RSS record’s publication time. Retrieval records collection; source coverage windows do not confirm occurrence times. Imports are manual and each source retains its own fetch status. Raw source-model alerts do not establish confirmed impact or our severity assessment.</p></div>
+      <div><p><strong>Color measures collected coverage.</strong> Green means 1–10 unique collected articles, amber 11–30, and red 31+. Official report counts stay neutral. These are filtered, potentially capped collections, not worldwide totals. Coverage does not establish severity or certainty; those assessments remain separate in the detail panel.</p><p><strong>Keep associations provisional.</strong> A candidate grouping is an unverified association of reports, not a confirmed shared incident. Textual place hints are unverified and receive no invented map point. Neutral “N events” markers only group separate nearby events for navigation.</p><p><strong>Keep clocks and origins distinct.</strong> Known publication time controls the filter; missing publication falls back to ThreatMon’s first collection time. Provider timestamps retain their supplied meaning and are not publication times. GDELT is a discovery provider; article publishers remain separately attributed. Manual imports keep per-source fetch status.</p></div>
       <p className="news-method-note">{data.duplicates_excluded.toLocaleString()} duplicate {data.duplicates_excluded === 1 ? "record excluded" : "records excluded"} during this edition’s ingestion (before the selected time window). Publisher breadth is not independent corroboration.</p>
     </section>
   </div>;

@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
 
 import type { NewsEventView } from "@/lib/news-types";
-import { clusterNewsEvents } from "@/lib/news-view";
+import { clusterNewsEvents, coverageIntensity, COVERAGE_INTENSITY_BANDS } from "@/lib/news-view";
 import { BASEMAP, LAND_PATHS, projectLocation, WORLD_HEIGHT, WORLD_WIDTH } from "@/lib/world-map";
 
 type LocatedEvent = NewsEventView & { location: NonNullable<NewsEventView["location"]> };
@@ -22,7 +22,6 @@ type MapDrag = {
 
 const LONGITUDES = [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150];
 const LATITUDES = [-60, -30, 0, 30, 60];
-const SEVERITY_LABELS = { unknown: "Unknown severity", low: "Low severity", moderate: "Moderate severity", high: "High severity" } as const;
 
 function hasLocation(event: NewsEventView): event is LocatedEvent {
   const location = event.location;
@@ -48,7 +47,7 @@ function coordinates(event: LocatedEvent): string {
 type CoverageCounts = { story_count: number; official_report_count?: number };
 
 function articleLabel(count: number): string {
-  return `${count} ${count === 1 ? "article" : "articles"}`;
+  return `${count} collected ${count === 1 ? "article" : "articles"}`;
 }
 
 function reportLabel(count: number): string {
@@ -195,6 +194,11 @@ export function NewsMap({ events, selectedId, onSelect }: {
       </div>
     </header>
 
+    <div className="news-map-legend" aria-label="Coverage intensity legend">
+      <span>Coverage intensity: {COVERAGE_INTENSITY_BANDS.map((band) => <span className="news-coverage-band" key={band.intensity}><i className={`coverage-${band.intensity}`} aria-hidden="true" /> {band.label}</span>)}</span>
+      <span>Collected article volume, not severity or worldwide totals.</span>
+    </div>
+
     {located.length ? <>
       <div className="news-map-toolbar" role="group" aria-label="Map view controls">
         <div className="news-map-zoom">
@@ -212,7 +216,7 @@ export function NewsMap({ events, selectedId, onSelect }: {
         </div> : <span className="news-map-toolbar-note">Select a marker to explore the coverage.</span>}
       </div>
 
-      <p id={`${id}-help`} className="sr-only">Event circles show article counts. Square markers show official report counts for events with no news articles. Events with both show articles in the circle and official reports in a separate caption. Counts are not severity scores. Markers labeled events group nearby, separate events and list article and official report counts separately. Select a group to choose an event. Use the zoom and pan controls, or focus the map and use plus, minus, Home, and arrow keys. The expandable located event index provides equivalent selection controls.</p>
+      <p id={`${id}-help`} className="sr-only">Event circles show collected article counts: green for 1 to 10, amber for 11 to 30, red for 31 or more. These counts describe collected coverage, not total worldwide coverage, severity or certainty. Neutral square markers show official report counts in the secondary bulletin view. Neutral groups labeled events represent nearby separate events. Select a group to choose an event. Use the zoom and pan controls, or focus the map and use plus, minus, Home, and arrow keys. The expandable located event index provides equivalent selection controls.</p>
       <div ref={mapViewport} className={`news-map-chart${view.zoom > 1 ? " is-zoomed" : ""}${dragging ? " is-dragging" : ""}`} tabIndex={0} role="group" aria-label="World news event map" aria-describedby={`${id}-help`} onKeyDown={handleMapKey} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onLostPointerCapture={stopDrag}>
         <div className="news-map-plane" style={{ transform: `translate(${view.panX}%, ${view.panY}%) scale(${view.zoom})` }}>
           <svg className="news-map-svg" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
@@ -256,15 +260,15 @@ export function NewsMap({ events, selectedId, onSelect }: {
               </button>;
               const event = marker.events[0];
               if (!event || !hasLocation(event)) return null;
-              const severity = SEVERITY_LABELS[event.severity];
+              const candidate = event.grouping_status === "candidate";
               const reportCount = officialReportCount(event);
               const officialOnly = event.story_count === 0 && reportCount > 0;
               const mixedCoverage = event.story_count > 0 && reportCount > 0;
               const markerCount = officialOnly ? reportCount : event.story_count;
               const markerSize = Math.round(44 + Math.min(24, Math.sqrt(markerCount) * 3));
-              return <button key={marker.id} type="button" className={`news-map-marker severity-${event.severity}${officialOnly ? " is-official-report" : ""}${mixedCoverage ? " has-mixed-coverage" : ""}${chosen ? " is-selected" : ""}${isIllustrative(event) ? " is-demo" : ""}${labelPosition}`} style={{ ...style, "--news-marker-size": `${markerSize}px` } as CSSProperties} aria-pressed={chosen} aria-label={`${event.title}. ${coverageLabel(event)}. ${severity}. Status: ${event.status}. ${locationDescription(event)}: ${event.location.label}. Select event.`} title={`${event.title} · ${coverageLabel(event)} · ${severity} · ${locationDescription(event)}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => selectEvent(event)}>
+              return <button key={marker.id} type="button" className={`news-map-marker coverage-${coverageIntensity(event.story_count)}${officialOnly ? " is-official-report" : ""}${mixedCoverage ? " has-mixed-coverage" : ""}${chosen ? " is-selected" : ""}${isIllustrative(event) ? " is-demo" : ""}${labelPosition}`} style={{ ...style, "--news-marker-size": `${markerSize}px` } as CSSProperties} aria-pressed={chosen} aria-label={`${event.title}. ${coverageLabel(event)}.${candidate ? " Candidate association, unverified." : ""} ${locationDescription(event)}: ${event.location.label}. Select event.`} title={`${event.title} · ${coverageLabel(event)}${candidate ? " · Candidate association, unverified" : ""} · ${locationDescription(event)}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => selectEvent(event)}>
                 <span className="news-map-marker-count" aria-hidden="true">{markerCount}</span>
-                <span className="news-map-marker-caption" aria-hidden="true"><span className={officialOnly || mixedCoverage ? "news-map-caption-kind" : "news-map-caption-volume"}>{officialOnly ? `official ${reportCount === 1 ? "report" : "reports"}` : event.story_count === 1 ? "article" : "articles"} · </span>{event.severity === "unknown" ? "Severity unknown" : `${event.severity} severity`}{mixedCoverage ? <span className="news-map-caption-reports">+ {reportLabel(reportCount)}</span> : null}{isIllustrative(event) ? <span className="news-map-marker-origin">DEMO</span> : event.location.precision === "approximate_area" ? <span className="news-map-marker-origin">Approximate area</span> : null}</span>
+                <span className="news-map-marker-caption" aria-hidden="true">{officialOnly ? reportLabel(reportCount) : articleLabel(event.story_count)}{mixedCoverage ? <span className="news-map-caption-reports">+ {reportLabel(reportCount)}</span> : null}{candidate ? <span className="news-map-marker-origin">Candidate association</span> : null}{isIllustrative(event) ? <span className="news-map-marker-origin">DEMO</span> : event.location.precision === "approximate_area" ? <span className="news-map-marker-origin">Approximate area</span> : null}</span>
               </button>;
             })}
           </div>
@@ -280,7 +284,7 @@ export function NewsMap({ events, selectedId, onSelect }: {
         <div className="news-map-chooser-list">
           {activeCluster.events.filter(hasLocation).map((event) => <button type="button" key={event.id} onClick={() => selectEvent(event)} aria-pressed={selectedId === event.id}>
             <strong>{event.title}</strong>
-            <span>{coverageLabel(event)} · {SEVERITY_LABELS[event.severity]} · {event.status}</span>
+            <span>{coverageLabel(event)}{event.grouping_status === "candidate" ? " · Candidate association, unverified" : ""}</span>
             <span>{event.location.label} · {locationDescription(event)}</span>
           </button>)}
         </div>
@@ -289,19 +293,17 @@ export function NewsMap({ events, selectedId, onSelect }: {
       <div className="news-map-status" aria-live="polite" aria-atomic="true">
         {selected ? <>
           <strong>{selected.title}</strong>
-          <span>{coverageLabel(selected)} · {SEVERITY_LABELS[selected.severity]}</span>
+          <span>{coverageLabel(selected)}{selected.grouping_status === "candidate" ? " · Candidate association, unverified" : ""}</span>
           <span>{selected.location.label} · {coordinates(selected)} · {locationDescription(selected)}</span>
           <span>Location confidence: {selected.location.confidence}. {selected.location.basis}</span>
         </> : <span>Select an event to view its articles and official reports. Locations are reference points, not impact areas.</span>}
       </div>
       <div className="news-map-legend" aria-label="Map legend">
-        <span>Circle number = news articles in this view.</span>
         <span>Square number = official reports where no news articles are available.</span>
         <span>Mixed coverage keeps official report counts in a separate caption.</span>
         <span>“N events” = separate nearby events. Select the group to inspect each event and its coverage.</span>
-        <span>Severity: <i className="severity-high" aria-hidden="true" /> high · <i className="severity-moderate" aria-hidden="true" /> moderate · <i className="severity-low" aria-hidden="true" /> low · <i className="severity-unknown" aria-hidden="true" /> unknown.</span>
         {demoCount ? <span>DEMO labels identify illustrative locations ({demoCount}).</span> : null}
-        <span>Article and report volume does not establish severity or corroboration.</span>
+        <span>Collected coverage may be capped or incomplete. Color is coverage intensity, not severity, certainty or total worldwide reporting.</span>
         <a href={BASEMAP.terms} target="_blank" rel="noreferrer">Natural Earth map data <span className="sr-only">(opens in a new tab)</span></a>
       </div>
 
@@ -310,7 +312,7 @@ export function NewsMap({ events, selectedId, onSelect }: {
         <div className="news-map-index-list" aria-label="Located events, including overlapping points">
           {located.map((event) => <button key={event.id} type="button" onClick={() => selectEvent(event)} aria-pressed={selectedId === event.id} className={selectedId === event.id ? "is-selected" : undefined}>
             <strong>{event.title}</strong>
-            <span>{coverageLabel(event)} · {SEVERITY_LABELS[event.severity]}</span>
+            <span>{coverageLabel(event)}{event.grouping_status === "candidate" ? " · Candidate association, unverified" : ""}</span>
             <span>{event.location.label} · {locationDescription(event)}</span>
           </button>)}
         </div>

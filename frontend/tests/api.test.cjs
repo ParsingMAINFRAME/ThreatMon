@@ -63,6 +63,13 @@ test('news editions use an explicit endpoint and do not silently substitute demo
   const api = apiFor([{ edition: 'snapshot', events: [] }, { status: 503 }]);
   const data = await api.getNews();
   assert.equal(data.edition, 'snapshot');
-  assert.equal(api.requests[0], 'http://test-api/news?edition=snapshot');
+  assert.equal(api.requests[0], 'http://test-api/news?edition=snapshot&channel=news');
   await assert.rejects(api.getNews('demo'), /HTTP 503/);
+});
+
+test('secondary bulletins use an explicit channel and never replace the primary news request', async () => {
+  const api = apiFor([{ channel: 'news', events: [] }, { channel: 'signals', events: [] }]);
+  assert.equal((await api.getNews()).channel, 'news');
+  assert.equal((await api.getNews('snapshot', 'signals')).channel, 'signals');
+  assert.deepEqual(api.requests, ['http://test-api/news?edition=snapshot&channel=news', 'http://test-api/news?edition=snapshot&channel=signals']);
 });
