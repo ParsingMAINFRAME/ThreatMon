@@ -63,4 +63,8 @@ uv run --frozen python -m app.cli news poll --source gdelt --interval-seconds 90
 
 ### Observed availability
 
-The single live adapter request on **September 30, 2026 at 23:24:10 UTC** returned **HTTP 429**, retained zero GDELT articles, and persisted a next permitted attempt of **23:39:10 UTC**. No retry or endpoint substitution was performed. Global Voices remained independently available from its existing snapshot. A tested adapter and candidate-grouping algorithm do not demonstrate successful real GDELT collection, real cross-publisher clusters, or defensible incident pins. Those outcomes remain blocked by provider availability and geographic evidence.
+The first live adapter request on **September 30, 2026 at 23:24:10 UTC** returned **HTTP 429**, retained zero GDELT articles, and persisted a next permitted attempt of **23:39:10 UTC**. Its raw error headers and body were not retained, so that deadline documents application state rather than a quoted server instruction.
+
+One request after that deadline, at **23:40:22 UTC**, returned **HTTP 200**, with `Cache-Control: public, max-age=900` and no `Retry-After` header. The adapter saved **250 canonical articles across 185 publisher domains** and advanced the watermark. Reaching the result cap made `possibly_truncated` true. There were **zero candidate event groups and zero supported incident points**. No immediate retry, endpoint substitution or background poller was used.
+
+This establishes one successful bounded discovery sample, not dependable availability, independent corroboration or a working real incident-dot map. Broad query terms can match business, sport, commentary or unrelated uses of an incident word. Relevance evaluation and supported event geography remain unfinished. The cheapest next step is to evaluate the saved sample before adding feeds or loosening grouping rules. Local sample caches are not distributed with the code.

@@ -19,6 +19,7 @@ uv run --frozen --extra dev pytest
 cd ../frontend
 npm ci
 npm run lint
+npm test
 npm run build
 ```
 

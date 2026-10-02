@@ -1,6 +1,18 @@
 # Data Model
 
-The application uses Pydantic models for API/domain contracts and SQLAlchemy records for persistence. Startup can seed local demo records into SQLite or Postgres. Alembic manages the schema. An operator CLI ingests official feed records or clearly labeled offline fixtures.
+The application uses Pydantic models for API/domain contracts. Official-signal records persist through SQLAlchemy in SQLite or Postgres; Alembic manages that schema. News metadata uses separate atomic JSON caches. Startup can seed local official-signal demo records; news demo fixtures are an explicitly selected edition.
+
+## News contracts
+
+| Model | Purpose |
+| --- | --- |
+| `NewsArticle` | Canonical URL identity, original link, headline, publisher identity, nullable publication date, first collection, retrieval, attribution and optional duplicate aliases. |
+| `NewsObservation` | Discovery provider, provider URL, supplied timestamp and raw value, retrieval, language and publisher-country metadata. It does not establish incident location. |
+| `NewsEvent` | Retained articles and a source event, single-source item or unverified candidate association; assignment version/revision, textual place hints, reporting status, separate severity and optional supported location. |
+| `NewsSourceStatus` | Last attempt and successful fetch, error, next permitted attempt, query window and result limits. |
+| `NewsResponse` | Explicit snapshot/demo edition, news/signals channel, response clock, source health and retained events. |
+
+News article totals are unions of canonical identities. Official-bulletin revisions are distinct from news articles. Coverage intensity is a display of filtered retained article volume, not a severity model. See [news contracts and limitations](news-pipeline.md).
 
 ## ThreatEvent
 

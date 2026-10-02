@@ -10,7 +10,7 @@ the checked-in lockfiles and keep dependencies updated. Before deploying beyond
 your machine, configure TLS, access controls appropriate to the data, request
 limits, backups, and an operational refresh policy.
 
-For a vulnerability, use the repository's **Security → Report a vulnerability**
+For a vulnerability, use the repository's **Security > Report a vulnerability**
 if private reporting is enabled. Otherwise contact the repository owner privately;
 do not post secrets or sensitive proof-of-concept details in a public issue.
 

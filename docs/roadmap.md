@@ -20,12 +20,12 @@
 
 ## Next useful milestones
 
-1. Validate an explicitly authorized deployed refresh worker over repeated successful fetches. The optional foreground GDELT poller exists; no automatic service is active. Preserve fetch-health history and stale-data indicators.
-2. Broaden permitted world-news publisher coverage beyond Global Voices, with reviewed event associations and defensible article geography. GDACS provides official hazard bulletins; NASA remains space/science coverage.
-3. Add analyst review and defensible incident-location evidence to the conservative candidate groups. DOC headline place references remain unlocated; never replace missing evidence with a capital or GEO mention point.
+1. Evaluate the saved 250-article discovery sample for relevance, duplicate/syndicated reporting and grouping recall. Establish reviewed examples before loosening candidate rules or adding feeds.
+2. Add defensible incident-location evidence and analyst review. DOC headline references remain unlocated; never substitute a capital or GEO mention point for missing evidence.
+3. Verify refresh reliability over repeated authorized fetches, then choose a deployment model. The foreground poller exists, but no automatic service is active.
 4. Add watchlists and source-backed exposure inputs.
 5. Add analyst notes and review states, followed by authentication and access controls.
-6. Add alert delivery only after refresh, deduplication, and stale-source behavior are defined.
+6. Add alert delivery only after refresh, deduplication and stale-source behavior are defined.
 
 ## Reserved scaffolds
 

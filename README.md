@@ -1,12 +1,28 @@
 # ThreatMon
 
-A source-cited news map and official-signal console. Open a numbered event hotspot to inspect its coverage, publishers, timestamps, and uncertainty. Explore earthquake and security-catalog records separately in the source register and evidence dossiers.
+A source-cited news and signal observatory. Explore collected reporting, inspect the evidence behind a record, and keep uncertainty in view.
+
+[![CI](https://github.com/ParsingMAINFRAME/ThreatMon/actions/workflows/ci.yml/badge.svg)](https://github.com/ParsingMAINFRAME/ThreatMon/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-4f6854)](LICENSE) [![Status: early prototype](https://img.shields.io/badge/status-early%20prototype-8a663d)](#current-capabilities)
 
 Built with **Next.js, TypeScript, FastAPI, SQLAlchemy, and Alembic**. The interface takes its cues from a cartographic atlas and an analyst's report: geography first, compact records, and references beside the assessment.
 
-![ThreatMon incident-news snapshot: attributed articles, unavailable GDELT discovery and no invented map points](docs/images/incident-news-live.jpg)
+![ThreatMon editorial atlas interface. The pictured hotspot map is explicitly fictional demo data.](docs/images/threatmon-hero.jpg)
 
-[View actual source status](docs/images/incident-news-status.jpg) | [View fictional hotspot demo](docs/images/incident-news-demo.jpg) | [View fictional mobile demo](docs/images/incident-news-mobile-demo.jpg) | [View official source signals](docs/images/world-atlas.jpg) | [View an evidence dossier](docs/images/evidence-brief.jpg)
+[Desktop demo](docs/images/release-demo-desktop.jpg) | [Mobile demo](docs/images/release-demo-mobile.jpg) | [Fetched articles](docs/images/release-fetched-desktop.jpg) | [Source status](docs/images/release-source-status.jpg) | [Evidence dossier](docs/images/evidence-brief.jpg)
+
+> **Early-stage prototype.** Metadata ingestion and the interactive demo work. A saved GDELT check collected 250 articles across 185 publisher domains, but produced **zero candidate event groups and zero supported incident points**. The real city-hotspot pipeline is unfinished. The pictured numbered hotspots are fictional scenarios, not live incidents.
+
+## Current capabilities
+
+| Available now | Boundary |
+| --- | --- |
+| Free, bounded GDELT discovery and attributed Global Voices headlines | A potentially capped article sample, not comprehensive incident coverage; broad queries can include irrelevant reporting. |
+| Canonical URL deduplication, provider observations and conservative candidate matching | Publisher domains are not independent confirmations. Matching has limited recall and has not demonstrated real event clusters in the saved sample. |
+| Numbered map markers, time filters, coverage panels and shareable selection URLs | Real articles stay unlocated without defensible event geography. The populated news map is an explicit offline demo. |
+| USGS/CISA signals and secondary GDACS/NASA bulletins | Different source classes and timestamp meanings remain separate. |
+| Persisted fetch status, backoff and an optional foreground poller | Opening the app only reads storage. No hosted monitoring service or alerts are running. |
+
+Built to make the data boundary inspectable: typed contracts, deterministic grouping, source clocks, uncertainty labels, and a local basemap with no paid map SDK. Start with the [offline demo](#run-the-demo), then review the [pipeline contract](docs/news-pipeline.md).
 
 ## Explore the console
 
@@ -169,6 +185,8 @@ Startup and CLI ingestion apply Alembic migrations before accessing data. The or
 
 ## Verification
 
+The [October 2 public-release checks](docs/release-checks.md) passed in a fresh isolated checkout: frozen installs, 351 backend tests (92% coverage), 48 frontend tests, lint, TypeScript, production build and dependency audits with no known vulnerabilities reported. Fresh headless captures verify the stored sample, demo interaction and mobile layouts. Docker validation runs in [CI](https://github.com/ParsingMAINFRAME/ThreatMon/actions/workflows/ci.yml); Docker was unavailable locally.
+
 ```sh
 cd backend
 uv run --frozen --extra dev pytest --cov=app --cov-report=term-missing
@@ -183,7 +201,7 @@ Tests use isolated databases, local fixtures, and mocked HTTP. They cover revisi
 
 The incident-news milestone was checked on 30 September 2026 with **351 backend tests (92% coverage), 48 frontend tests**, lint, TypeScript checking and a production build. Twenty isolated headless checks cover desktop and 375px/320px layouts, keyboard selection, time windows, publisher/selection URL reload and Back, source failure status, label bounds, coverage focus and volume colors independent of severity. All 1,762 existing SQL records were preserved.
 
-The single live GDELT request at **23:24:10 UTC returned HTTP 429**; no immediate retry was made. The interface shows the failure and persisted next permitted import. Successful real GDELT collection, cross-publisher candidates and city incident points remain unverified. The prior 22:43 UTC import retained 15 Global Voices articles, 30 GDACS bulletins and 10 NASA articles; all 55 original links passed HEAD checks at 22:45 UTC. Those unchanged snapshots remain available in their respective channels. The default 24-hour view contains a smaller subset. These are dated observations, not ongoing availability guarantees. Docker was unavailable locally; its smoke check remains defined in CI.
+On **September 30, 2026**, GDELT first returned HTTP 429 at 23:24 UTC. One subsequent request after the persisted cooldown succeeded at 23:40 UTC: **250 canonical articles, 185 publisher domains, zero candidate groups, zero incident points**. The response reached its cap and supplied a 900-second cache duration. No full articles were fetched, no immediate retry was made, and no unattended worker was started. The prior 22:43 UTC import retained 15 Global Voices articles, 30 GDACS bulletins and 10 NASA articles; all 55 original links passed HEAD checks at 22:45 UTC. These dated checks are not uptime or current-news guarantees. Local caches and databases are excluded from the repository. Fresh release captures show their actual age, or clearly labeled synthetic data. Docker was unavailable locally; its smoke check is defined in CI.
 
 ## Scoring and limitations
 
@@ -211,4 +229,4 @@ Filters, sort order, register page, and selected record are encoded in the URL. 
 
 ## Project and license
 
-Contributions should preserve evidence, uncertainty, and clear demo labeling. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [safety policy](docs/safety_policy.md). Code is available under the [MIT license](LICENSE). The basemap is [Natural Earth public-domain data](https://www.naturalearthdata.com/about/terms-of-use/), with a pinned source and attribution in [the map documentation](docs/map.md). Other external source content remains subject to its publisher's terms; no source endorsement is implied.
+Contributions should preserve evidence, uncertainty, and clear demo labeling. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [safety policy](docs/safety_policy.md). Original code is available under the [MIT license](LICENSE). Dependencies and source content retain their own rights; see [third-party notices](THIRD_PARTY_NOTICES.md). The basemap is [Natural Earth public-domain data](https://www.naturalearthdata.com/about/terms-of-use/), with a pinned source and attribution in [the map documentation](docs/map.md). No source endorsement is implied.
