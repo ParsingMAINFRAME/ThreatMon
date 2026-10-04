@@ -30,7 +30,14 @@ MAX_TIME_SPAN = timedelta(hours=24)
 # Ambiguous Tripoli specifically requires its country in text.
 CITY_MENTIONS = tuple(city for city in CITY_POINTS if not city.startswith("Tripoli"))
 # Explicit same-name-city disambiguators, not inferred countries. Their presence blocks a map position.
-PLACE_QUALIFIERS = ("Texas", "Ontario")
+PLACE_QUALIFIERS = (
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia",
+    "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland",
+    "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
+    "New Jersey", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
+    "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Wisconsin", "Wyoming",
+    "Alberta", "British Columbia", "Manitoba", "Nova Scotia", "Ontario", "Quebec", "Saskatchewan",
+)
 COUNTRY_CLUES = (*COUNTRY_POINTS, *PLACE_QUALIFIERS)
 # Ordered: when a headline uses several incident words, the first matching kind names the event.
 INCIDENT_WORDS = {
@@ -194,6 +201,14 @@ def _clues(article: NewsArticle) -> _Clues:
     eligible = (place is not None and time is not None and not conflicting_provider_times and not unsupported_language
                 and all(len(values) <= 1 for values in dates.values()))
     return _Clues(article, places, countries, kinds[0] if reported else None, words, dates, time, place, bool(eligible))
+
+
+def placed_country(article: NewsArticle) -> str | None:
+    """The country of the place this headline would be placed at, or None when it would stay unlocated."""
+    place = _clues(article).place
+    if place is None:
+        return None
+    return place.label.rsplit(", ", 1)[-1] if place.level == "city" else place.label
 
 
 def _compatible(left: _Clues, right: _Clues) -> bool:

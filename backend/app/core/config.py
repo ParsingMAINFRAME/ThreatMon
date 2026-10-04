@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,6 +15,9 @@ class Settings(BaseSettings):
     news_snapshot_path: str = "./.artifacts/news/nasa-snapshot.json"
     news_poll_interval_seconds: int = Field(default=900, ge=900, le=86400)
     news_gdelt_query: str = Field(default="(airstrike OR \"missile strike\" OR \"drone attack\" OR bombing OR \"car bomb\" OR shelling OR explosion OR \"mass shooting\" OR \"terror attack\" OR coup OR riots OR earthquake OR wildfire OR flooding) sourcelang:english", min_length=3, max_length=500)
+
+    # "bulk" reads GDELT's published 15-minute files; "doc" uses the rate-limited DOC search API.
+    news_gdelt_mode: Literal["bulk", "doc"] = "bulk"
 
     @field_validator("news_gdelt_query")
     @classmethod

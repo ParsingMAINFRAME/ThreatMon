@@ -18,6 +18,13 @@ def prevent_real_network(monkeypatch):
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", block)
 
 
+@pytest.fixture(autouse=True)
+def gdelt_doc_mode(monkeypatch):
+    """Existing GDELT tests describe the DOC search contract; bulk-file tests opt in explicitly."""
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "news_gdelt_mode", "doc")
+
+
 @pytest.fixture
 def db_engine():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)

@@ -119,7 +119,7 @@ uv run --frozen python -m app.cli ingest --connector usgs_earthquakes
 uv run --frozen python -m app.cli ingest --connector cisa_kev
 uv run --frozen python -m app.cli ingest --connector all
 uv run --frozen python -m app.cli news ingest --source all
-uv run --frozen python -m app.cli news ingest --source gdelt
+uv run --frozen python -m app.cli news ingest --source gdelt   # reads GDELT bulk 15-minute files by default
 uv run --frozen python -m app.cli news ingest --source wikipedia
 uv run --frozen python -m app.cli news ingest --source globalvoices
 uv run --frozen python -m app.cli news ingest --source gdacs

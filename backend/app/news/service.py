@@ -50,7 +50,7 @@ SOURCES = {
         "https://globalvoices.org/about/global-voices-attribution-policy/",
         "Global Voices and each named author; CC BY 3.0. Headlines and attribution only; no endorsement implied.",
         "At most 20 independent publisher articles. The RSS supplies no verified event association or incident coordinates; candidate associations and headline place markers are separate heuristics.", 900),
-    "gdelt": SourceConfig("GDELT DOC", "discovery", "https://api.gdeltproject.org/api/v2/doc/doc",
+    "gdelt": SourceConfig("GDELT", "discovery", "https://api.gdeltproject.org/api/v2/doc/doc",
         "https://gdeltproject.org/about.html",
         "Discovery metadata provided by GDELT; article attribution belongs to each linked publisher. No article content licence or endorsement is implied.",
         "At most 250 collected canonical URLs retained for seven days after first ThreatMon collection. Query results may be capped and incomplete. seendate is an unverified provider timestamp, not publication. Publisher identity is a normalized URL hostname; publisher-country metadata is not incident geography.", 900),
@@ -419,6 +419,8 @@ async def ingest_sources(path: Path | str, *, source: str = "all", client: httpx
 async def ingest_gdelt(path: Path | str, *, client: httpx.AsyncClient | None = None,
                        now: datetime | None = None) -> NewsResponse:
     """One request per import; preserve good metadata and query progress independently."""
+    if get_settings().news_gdelt_mode == "bulk":
+        return await ingest_gdelt_bulk(path, client=client, now=now)
     from app.news.gdelt import GDELT_URL, GDELT_LIMIT, merge_articles, parse_gdelt_response
     from app.news.grouping import group_candidate_events
     now = now or utc_now()
@@ -482,6 +484,88 @@ async def ingest_gdelt(path: Path | str, *, client: httpx.AsyncClient | None = N
                            query_watermark=cache.query_watermark if cache else None,
                            watermark_query=cache.watermark_query if cache else None,
                            query_window_start=start, query_window_end=end, query=query, possibly_truncated=truncated)
+    result = _with_status(result, "gdelt", stored.next_fetch_at, stored)
+    stored.response = result
+    try:
+        _save_cache(target, stored)
+    except (OSError, NewsError):
+        return _with_status(previous.model_copy(update={"as_of": now, "last_attempt_at": now, "fetch_state": "error",
+                            "error": "Could not save GDELT cache; previous disk snapshot remains unchanged"}),
+                            "gdelt", cache.next_fetch_at if cache else None, cache)
+    return result
+
+
+async def _download(client: httpx.AsyncClient, url: str, limit: int, now: datetime) -> bytes:
+    async with client.stream("GET", url, headers={"User-Agent": "ThreatMon/0.4 (https://github.com/ParsingMAINFRAME/ThreatMon; bounded metadata client)"},
+                             timeout=30, follow_redirects=False) as response:
+        if response.status_code != 200:
+            raise NewsError(f"GDELT file server returned HTTP {response.status_code}; no immediate retry", _retry_after(response.headers.get("retry-after"), now))
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > limit:
+                raise NewsError("GDELT file exceeds its download limit")
+        return bytes(body)
+
+
+async def ingest_gdelt_bulk(path: Path | str, *, client: httpx.AsyncClient | None = None,
+                            now: datetime | None = None) -> NewsResponse:
+    """Read the newest published 15-minute files; at most four per import, never the search API."""
+    from app.news.gdelt import GDELT_LIMIT, merge_articles
+    from app.news.gdelt_bulk import BULK_QUERY, LASTUPDATE_URL, MAX_ZIP_BYTES, file_times, file_url, latest_file_time, parse_gkg_file
+    from app.news.grouping import group_candidate_events
+    now = now or utc_now()
+    base = Path(path)
+    target = source_cache_path(base, "gdelt")
+    try:
+        cache = _load_cache(target, "gdelt")
+    except NewsError:
+        cache = None
+    previous = cache.response if cache else _empty(now, source="gdelt")
+    if cache and now < cache.next_fetch_at:
+        return _with_status(previous.model_copy(update={"as_of": now}), "gdelt", cache.next_fetch_at, cache)
+    if client is None:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as owned_client:
+            return await ingest_gdelt_bulk(base, client=owned_client, now=now)
+    watermark = cache.query_watermark if cache and cache.watermark_query == BULK_QUERY else None
+    start = end = None
+    truncated = bool(cache and cache.possibly_truncated and cache.watermark_query == BULK_QUERY)
+    try:
+        async with asyncio.timeout(150):
+            latest = latest_file_time(await _download(client, LASTUPDATE_URL, 4096, now))
+            if latest > now + timedelta(minutes=15):
+                raise NewsError("GDELT listed a file dated in the future")
+            times, skipped = file_times(latest, watermark)
+            new_articles = []
+            for time in times:
+                new_articles.extend(parse_gkg_file(await _download(client, file_url(time), MAX_ZIP_BYTES, now), file_time=time, retrieved_at=now))
+        if times:
+            start, end = times[0] - timedelta(minutes=15), times[-1]
+        else:
+            start, end = cache.query_window_start, cache.query_window_end
+        existing = [article for event in previous.events for article in event.articles]
+        combined = merge_articles([*existing, *new_articles])
+        recent = [article for article in combined if (article.first_seen_at or article.retrieved_at) >= now - timedelta(days=7)]
+        recent.sort(key=lambda article: (-(article.first_seen_at or article.retrieved_at).timestamp(), article.id))
+        # Skipped older files or a full retention window leave completeness unknown.
+        truncated = truncated or skipped or len(recent) > GDELT_LIMIT
+        events = group_candidate_events(recent[:GDELT_LIMIT], previous_events=previous.events)
+        result = NewsResponse(edition="snapshot", as_of=now, fetched_at=now, last_attempt_at=now, fetch_state="ok",
+                              events=events, duplicates_excluded=len(existing) + len(new_articles) - len(combined),
+                              source_note=SOURCES["gdelt"].coverage_note)
+        stored = NewsCache(response=result, next_fetch_at=_next_fetch(now, 900), query_watermark=latest,
+                           query_window_start=start, query_window_end=end, query=BULK_QUERY, watermark_query=BULK_QUERY,
+                           possibly_truncated=truncated)
+    except (NewsError, TimeoutError, ValidationError, httpx.HTTPError) as error:
+        message = str(error) if isinstance(error, NewsError) else "GDELT file retrieval failed; retained metadata preserved; no immediate retry"
+        cooldown = max(900, getattr(error, "retry_after", 0))
+        result = previous.model_copy(update={"as_of": now, "last_attempt_at": now, "fetch_state": "error", "error": message[:500]})
+        stored = NewsCache(response=result, next_fetch_at=_next_fetch(now, cooldown),
+                           query_watermark=cache.query_watermark if cache else None,
+                           watermark_query=cache.watermark_query if cache else None,
+                           query_window_start=cache.query_window_start if cache else None,
+                           query_window_end=cache.query_window_end if cache else None,
+                           query=cache.query if cache else BULK_QUERY, possibly_truncated=truncated)
     result = _with_status(result, "gdelt", stored.next_fetch_at, stored)
     stored.response = result
     try:
