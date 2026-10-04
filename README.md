@@ -20,7 +20,7 @@ Built with **Next.js, TypeScript, FastAPI, SQLAlchemy, and Alembic**. The interf
 | Canonical URL deduplication, provider observations and conservative candidate matching | Publisher domains are not independent confirmations. Matching groups reports that name the same place and incident type within 24 hours; it has limited recall and can combine separate incidents. |
 | Numbered map markers, time filters, coverage panels and shareable selection URLs | Real articles are placed only at a city or country named in an incident headline, marked approximate and low confidence; a country marker is its rough centre, not its capital. Everything else stays unlocated. |
 | USGS/CISA signals and secondary GDACS/NASA bulletins | Different source classes and timestamp meanings remain separate. |
-| Persisted fetch status, backoff and an optional foreground poller | Opening the app only reads storage. No hosted monitoring service or alerts are running. |
+| Persisted fetch status, backoff and an optional poller (`news poll`, or `docker compose --profile live up -d`) | Opening the app only reads storage. The poller runs only when you start it; no hosted service or alerts exist. |
 
 Built to make the data boundary inspectable: typed contracts, deterministic grouping, source clocks, uncertainty labels, and a local basemap with no paid map SDK. Start with the [offline demo](#run-the-demo), then review the [pipeline contract](docs/news-pipeline.md).
 

@@ -75,14 +75,24 @@ The optional foreground polling command uses the same persisted state and import
 
 Actual automatic operation must be demonstrated by starting an authorized worker and observing repeated successful retrievals. This milestone makes no claim of 24/7 operation.
 
+### Automatic refresh
+
+`news poll` runs one queue that imports GDELT bulk files, Wikipedia Current events and Global Voices in turn, then waits at least `NEWS_POLL_INTERVAL_SECONDS` (default and minimum 900) and until the soonest source permits another request. Each source keeps its own cooldown and failure backoff, so a failing source does not delay the others and is not retried early. Pass `--source gdelt`, `wikipedia` or `globalvoices` to poll one.
+
+Start it natively from `backend` with `uv run --frozen python -m app.cli news poll`, or with Docker using `docker compose --profile live up -d`, which adds a `poller` service beside the API. The default `docker compose up` demo still starts no poller. Stop with Ctrl+C or `docker compose stop poller`; both release the cache lock.
+
+The lock now records when its claim expires. A one-shot import claims ten minutes; the poller renews its claim past each wait. A lock left by a killed process is reclaimed only after its own expiry, so a restarted poller recovers without manual cleanup. A lock without an expiry still needs operator verification.
+
+**Observed reliability.** On October 4, 2026 the poller ran five consecutive cycles from 21:57 to 22:57 UTC at the 15-minute interval. All 15 source imports succeeded. Retained GDELT headlines grew from 11 to 28, mapped events from 20 to 34, and two cross-publisher candidate events formed. This is one hour on one machine, not evidence of long-run availability. The Docker `poller` service has not been run here because Docker is not installed on the development machine.
+
 ### Operator commands
 
 From `backend`, using the existing project environment:
 
 ```sh
 uv run --frozen python -m app.cli news ingest --source gdelt
-# Optional foreground process; this command has not been started for the milestone:
-uv run --frozen python -m app.cli news poll --source gdelt --interval-seconds 900
+# Keeps all news sources refreshed until stopped:
+uv run --frozen python -m app.cli news poll --interval-seconds 900
 ```
 
 `NEWS_GDELT_QUERY` controls bounded query text; `NEWS_POLL_INTERVAL_SECONDS` defaults to 900 and permits 900–86400. Configure API and CLI with the same `NEWS_SNAPSHOT_PATH`. Stop a foreground poller with Ctrl+C. The same cache lock protects both CLI commands; a lock left after abrupt termination requires checking that its owner is no longer running before removing that exact lock file. No automatic stale-lock deletion is performed.

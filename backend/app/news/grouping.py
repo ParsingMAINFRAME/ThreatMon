@@ -181,9 +181,10 @@ class _Clues:
 
 
 def _clues(article: NewsArticle) -> _Clues:
-    headline = article.headline.split(" | ")[0]  # A trailing publisher name is not part of the report.
+    headline, _, outlet = article.headline.partition(" | ")  # A trailing publisher name is not part of the report.
     text = NOT_A_PLACE.sub(" ", _text(headline)).strip()
-    places = _places(text)
+    # An outlet named after the same town ("Athens News Courier") signals a local story, not the well-known city.
+    places = tuple(place for place in _places(text) if not _mentions(_text(outlet), place.split(",")[0]))
     countries = frozenset(country for country in COUNTRY_CLUES if _mentions(text, country))
     tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", headline)
     lowered = {_text(token) for token in tokens}

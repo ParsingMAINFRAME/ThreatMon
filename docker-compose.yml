@@ -17,6 +17,21 @@ services:
       retries: 5
       start_period: 15s
 
+  # Optional live refresh: `docker compose --profile live up -d`. Not started by the default demo.
+  poller:
+    profiles: ["live"]
+    build: ./backend
+    command: ["/app/.venv/bin/python", "-m", "app.cli", "news", "poll", "--source", "news"]
+    environment:
+      NEWS_SNAPSHOT_PATH: /data/news-snapshot.json
+      NEWS_POLL_INTERVAL_SECONDS: ${NEWS_POLL_INTERVAL_SECONDS:-900}
+    volumes:
+      - threatroom-data:/data
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     environment:
