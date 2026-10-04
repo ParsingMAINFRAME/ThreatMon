@@ -142,6 +142,8 @@ class IngestionRunRecord(Base):
     data_mode: Mapped[str] = mapped_column(String(20), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Recording order. Timestamps can tie on coarse clocks, so "latest run" is decided by this, not by time.
+    sequence: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0", index=True)
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)
     item_count: Mapped[int] = mapped_column(nullable=False, default=0)
     inserted_count: Mapped[int] = mapped_column(nullable=False, default=0)
