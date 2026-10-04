@@ -35,6 +35,7 @@ function isIllustrative(event: LocatedEvent): boolean {
 
 function locationDescription(event: LocatedEvent): string {
   if (isIllustrative(event)) return "DEMO / illustrative location";
+  if (event.grouping_status !== "source_event" && event.location.precision === "approximate_area") return "Place named in headline, not a verified site";
   return event.location.precision === "approximate_area" ? "Approximate area reference" : "Source-reported point";
 }
 

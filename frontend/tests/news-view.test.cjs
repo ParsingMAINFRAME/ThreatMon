@@ -106,6 +106,20 @@ test('nearby map groups keep incidents distinct and expand at maximum zoom', () 
   assert.equal(clusterNewsEvents(events, 3).length, 3);
 });
 
+test('events at the same headline place stay grouped at maximum zoom so every one is reachable', () => {
+  const moscow = { lat: 55.76, lon: 37.62, label: 'Moscow, Russia (place named in headline)', precision: 'approximate_area', confidence: 'low', basis: 'Headline mention.' };
+  const events = buildNewsEvents([
+    event('attack', [article('a'), article('b')], { location: moscow }),
+    event('blast', [article('c')], { location: moscow }),
+    event('kyiv', [article('d')], { location: { ...moscow, lat: 50.45, lon: 30.52, label: 'Kyiv, Ukraine (place named in headline)' } }),
+  ], AS_OF, '24h');
+  const groups = clusterNewsEvents(events, 3);
+  assert.equal(groups.length, 2);
+  const stacked = groups.find(group => group.kind === 'cluster');
+  assert.deepEqual(plain(stacked.events.map(e => e.id)), ['attack', 'blast']);
+  assert.equal(stacked.story_count, 3);
+});
+
 test('map grouping recognizes proximity across the dateline and never plots malformed points', () => {
   const events = buildNewsEvents([
     event('east', [article('east')], { location: { lat: 10, lon: 179, label: 'East', precision: 'illustrative', confidence: 'low', basis: 'Demo' } }),

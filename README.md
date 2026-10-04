@@ -10,15 +10,15 @@ Built with **Next.js, TypeScript, FastAPI, SQLAlchemy, and Alembic**. The interf
 
 [Desktop demo](docs/images/release-demo-desktop.jpg) | [Mobile demo](docs/images/release-demo-mobile.jpg) | [Fetched articles](docs/images/release-fetched-desktop.jpg) | [Source status](docs/images/release-source-status.jpg) | [Evidence dossier](docs/images/evidence-brief.jpg)
 
-> **Early-stage prototype.** Metadata ingestion and the interactive demo work. A saved GDELT check collected 250 articles across 185 publisher domains, but produced **zero candidate event groups and zero supported incident points**. The real city-hotspot pipeline is unfinished. The pictured numbered hotspots are fictional scenarios, not live incidents.
+> **Early-stage prototype.** Metadata ingestion and the interactive demo work. Incident headlines that name one clear city or country are now placed on the map at that place, labeled as an approximate, low-confidence headline mention rather than a verified site. Placement is keyword matching over a small gazetteer, so recall is limited and wrong markers are possible. The pictured numbered hotspots are fictional scenarios, not live incidents.
 
 ## Current capabilities
 
 | Available now | Boundary |
 | --- | --- |
 | Free, bounded GDELT discovery and attributed Global Voices headlines | A potentially capped article sample, not comprehensive incident coverage; broad queries can include irrelevant reporting. |
-| Canonical URL deduplication, provider observations and conservative candidate matching | Publisher domains are not independent confirmations. Matching has limited recall and has not demonstrated real event clusters in the saved sample. |
-| Numbered map markers, time filters, coverage panels and shareable selection URLs | Real articles stay unlocated without defensible event geography. The populated news map is an explicit offline demo. |
+| Canonical URL deduplication, provider observations and conservative candidate matching | Publisher domains are not independent confirmations. Matching groups reports that name the same place and incident type within 24 hours; it has limited recall and can combine separate incidents. |
+| Numbered map markers, time filters, coverage panels and shareable selection URLs | Real articles are placed only at a city or country named in an incident headline, marked approximate and low confidence; a country marker is its rough centre, not its capital. Everything else stays unlocated. |
 | USGS/CISA signals and secondary GDACS/NASA bulletins | Different source classes and timestamp meanings remain separate. |
 | Persisted fetch status, backoff and an optional foreground poller | Opening the app only reads storage. No hosted monitoring service or alerts are running. |
 
@@ -26,7 +26,7 @@ Built to make the data boundary inspectable: typed contracts, deterministic grou
 
 ## Explore the console
 
-- **Incident news (`/`):** event hotspots count collected unique articles. Coverage-intensity colors are green 1–10, amber 11–30 and red 31+; severity and reporting status remain separate. Neutral spatial groups open a picker of distinct events. Unsupported geography remains unlocated.
+- **Incident news (`/`):** event hotspots count collected unique articles. Coverage-intensity colors are green 1–10, amber 11–30 and red 31+; severity and reporting status remain separate. Neutral spatial groups open a picker of distinct events. Headlines without one clear named place remain unlocated.
 - **Coverage panel:** time filters, publisher breadth, grouping rationale, geographic confidence, and article-level timestamps stay beside the map. Snapshot articles link to their original publisher; synthetic stories open a labeled demonstration preview.
 - **Real news first:** the default edition reads GDELT discovery metadata and attributed Global Voices articles. Conservative cross-publisher associations are explicitly unverified candidates. GDELT is a discovery provider, not the publisher; capped query results never represent worldwide totals. GDACS and NASA move to `/signals?view=bulletins`. Synthetic 5-story and 35-story scenarios remain an explicit demo edition.
 - **World atlas:** locally rendered Natural Earth coastlines, cited event points, coordinate readouts, bounded zoom and pan, and clear coverage counts. Keyboard controls and a point index make overlapping markers accessible.

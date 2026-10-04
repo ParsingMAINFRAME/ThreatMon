@@ -49,7 +49,7 @@ SOURCES = {
     "globalvoices": SourceConfig("Global Voices", "news", GLOBALVOICES_FEED_URL,
         "https://globalvoices.org/about/global-voices-attribution-policy/",
         "Global Voices and each named author; CC BY 3.0. Headlines and attribution only; no endorsement implied.",
-        "At most 20 independent publisher articles. The RSS supplies no verified event association or incident coordinates; candidate associations are separate heuristics.", 900),
+        "At most 20 independent publisher articles. The RSS supplies no verified event association or incident coordinates; candidate associations and headline place markers are separate heuristics.", 900),
     "gdelt": SourceConfig("GDELT DOC", "discovery", "https://api.gdeltproject.org/api/v2/doc/doc",
         "https://gdeltproject.org/about.html",
         "Discovery metadata provided by GDELT; article attribution belongs to each linked publisher. No article content licence or endorsement is implied.",
@@ -65,7 +65,8 @@ AGGREGATE_NOTE = ("Collected source metadata; no completeness guarantee. Polling
                   "fetched_at is the latest successful retrieval or revalidation of ANY source; inspect each source's own status and clock. "
                   "Publication dates, where supplied, are not incident occurrence times. first_seen_at is first ThreatMon collection; provider timestamps retain their own provenance and uncertain meaning. "
                   "Source windows are source-provided periods, possibly forecasts. Time filters use the response as_of clock. "
-                  "Candidate article associations are heuristics, not verified incidents or independent corroboration. No article bodies, images or inferred coordinates are retained.")
+                  "Candidate article associations are heuristics, not verified incidents or independent corroboration. A news marker is the reference point of a place named in a headline, "
+                  "with low confidence; it is not a verified incident site. No article bodies or images are retained.")
 
 
 class NewsError(ValueError):

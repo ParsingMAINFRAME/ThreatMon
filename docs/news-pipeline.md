@@ -33,11 +33,19 @@ Publication filters use actual publisher publication where supplied, otherwise e
 
 ## Candidate associations and geography
 
-Candidate matching requires compatible local-place, narrow incident-type and distinctive named/content clues, plus a bounded time interval. Every pair in a group must satisfy the rule; a chain of weak links cannot merge unrelated incidents. Country-only references, ambiguous places, conflicting dates/locations and unsupported headline types stay separate. The group retains the rule version, assignment revision and explanation.
+Rule version `headline-place-v2` reads each English headline for two things: an incident word (attack, strike, bombing, missile, drone, explosion, shooting, riot, coup, protest, fire, flood, earthquake, outage, crash) and a place from the built-in gazetteer in `app/news/gazetteer.py`.
 
-This is intentionally conservative and limited to the documented recognition vocabulary. A candidate group is an unverified association, not an asserted incident. Unknown severity remains unknown. Article URLs remain individually inspectable.
+**Placement.** A headline that reports an incident and names one clear place is put on the map at that place's reference point:
 
-No headline mention becomes a coordinate. [GEO](https://blog.gdeltproject.org/gdelt-geo-2-0-api-debuts/) maps mentions near search terms and can contain contextual or geocoding errors; the adapter does not use it to pin incidents. DOC alone cannot supply defensible city incident points. Candidate place hints stay textual and unlocated until supported by an authoritative event identity/location or reviewed incident evidence. A country mention is not replaced by its capital. This remains the principal gap between the implemented discovery pipeline and a populated real incident-dot map.
+- One recognized city: the city centre. `Ukraine bombs Moscow` is placed at Moscow.
+- Several places: only the one introduced by a targeting word (`in`, `on`, `near`, `hits`, `strikes`, `bombs` and similar). `Russia strikes Ukraine` is placed at Ukraine; `Iran and Israel trade attacks` stays unlocated.
+- A country alone: the country's rough geographic centre, never its capital, and only when the country is targeted or leads the headline. `Bomb blast kills three in Saudi Arabia` is placed at the centre of Saudi Arabia. `Flight to Israel diverted after attack` stays unlocated.
+
+Every such position carries `precision: approximate_area`, `confidence: low`, a label ending in `(place named in headline)` or `(country named in headline)`, and a basis sentence saying it is not a verified incident site. The map and detail panel show that wording. Headlines that are historical, speculative, ambiguous (`Tripoli` without its country, `Paris, Texas`), or that use an incident word figuratively (`heart attack`, `rail strike`, `under fire`, sport) stay unlocated. Publication names such as `New York Times` and a trailing `| Publisher` are not read as places. Publisher country, GDELT `SourceCountry` and [GEO](https://blog.gdeltproject.org/gdelt-geo-2-0-api-debuts/) results are never used for placement.
+
+**Association.** Articles from two or more publishers form one candidate event when they name the same place and incident type and every pair falls within 24 hours without conflicting explicit dates. Country-level matches must also share two content words, because a whole country is too broad to assume one incident. Every pair in a group must satisfy the rule; a chain of weak links cannot merge. The group retains the rule version, assignment revision and explanation. Article count per event drives the coverage-intensity color.
+
+**Known limits.** This is keyword matching, not verification. Separate incidents in one city on one day can be combined. A figurative or unrelated use of an incident word can slip through and produce a wrong marker. The gazetteer covers about 150 cities and 95 countries; other places, demonyms (`Syrian`, `Russian`) and non-English headlines are not placed. A candidate group is an unverified association, not an asserted incident. Unknown severity remains unknown. Article URLs remain individually inspectable.
 
 ## Refresh and failure contract
 
