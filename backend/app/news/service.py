@@ -54,13 +54,18 @@ SOURCES = {
         "https://gdeltproject.org/about.html",
         "Discovery metadata provided by GDELT; article attribution belongs to each linked publisher. No article content licence or endorsement is implied.",
         "At most 250 collected canonical URLs retained for seven days after first ThreatMon collection. Query results may be capped and incomplete. seendate is an unverified provider timestamp, not publication. Publisher identity is a normalized URL hostname; publisher-country metadata is not incident geography.", 900),
+    "wikipedia": SourceConfig("Wikipedia Current events", "discovery", "https://en.wikipedia.org/w/api.php",
+        "https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use",
+        "Entry text by Wikipedia contributors, CC BY-SA 4.0, from the Current events portal; each entry links the first source it cites. No endorsement implied.",
+        "Editor-curated entries for today and the two previous UTC days, at most 120. Entry text is Wikipedia's summary, not the linked publisher's headline. The portal day is an editor-chosen event day, not a publication time. Coverage reflects what volunteers have added and is incomplete.", 900),
     "gdacs": SourceConfig("GDACS", "official", GDACS_FEED_URL, "https://www.gdacs.org/About/termofuse.aspx",
         "GDACS / European Commission and United Nations. EU-owned content follows the linked Commission reuse policy; third-party rights remain separate. Metadata normalized; no endorsement implied.",
         "Only the latest 30 source events from available feed records are retained; this is not complete disaster coverage. Event IDs group revisions only. Source alert levels model potential humanitarian impact; reference points are approximate, and source date windows may include forecasts. Not population warnings.", 900),
     "nasa": SourceConfig("NASA", "news", NASA_FEED_URL, "https://www.nasa.gov/nasa-brand-center/images-and-media/",
         "NASA article metadata; no endorsement implied.", SOURCE_NOTE, 300),
 }
-CHANNEL_SOURCES = {"news": ("globalvoices", "gdelt"), "signals": ("gdacs", "nasa"), "all": tuple(SOURCES)}
+NEWS_SOURCES = ("globalvoices", "gdelt", "wikipedia")
+CHANNEL_SOURCES = {"news": NEWS_SOURCES, "signals": ("gdacs", "nasa"), "all": tuple(SOURCES)}
 AGGREGATE_NOTE = ("Collected source metadata; no completeness guarantee. Polling runs only when an operator explicitly starts the CLI worker. "
                   "fetched_at is the latest successful retrieval or revalidation of ANY source; inspect each source's own status and clock. "
                   "Publication dates, where supplied, are not incident occurrence times. first_seen_at is first ThreatMon collection; provider timestamps retain their own provenance and uncertain meaning. "
@@ -247,8 +252,8 @@ def _aggregate(responses: list[NewsResponse], now: datetime, channel: str = "all
     attempts = [status.last_attempt_at for status in sources if status.last_attempt_at]
     errors = [f"{status.name}: {status.error}" for status in sources if status.error]
     source_events = [event for response in responses for event in response.events]
-    news_articles = [article for event in source_events for article in event.articles if article.source_id in {"globalvoices", "gdelt"}]
-    events = [event for event in source_events if all(article.source_id not in {"globalvoices", "gdelt"} for article in event.articles)]
+    news_articles = [article for event in source_events for article in event.articles if article.source_id in NEWS_SOURCES]
+    events = [event for event in source_events if all(article.source_id not in NEWS_SOURCES for article in event.articles)]
     merged = merge_articles(news_articles)
     events.extend(group_candidate_events(merged, previous_events=source_events))
     events.sort(key=lambda event: (-max(article_clock(article) for article in event.articles).timestamp(), event.id))
@@ -308,7 +313,12 @@ def _next_fetch(now: datetime, seconds: int) -> datetime:
 
 async def _fetch(client: httpx.AsyncClient, cache: NewsCache | None, now: datetime, source: str = "nasa") -> tuple[bytes | None, httpx.Headers]:
     config = SOURCES[source]
+    url = config.feed_url
     headers = {"User-Agent": "ThreatMon/0.3 (read-only RSS portfolio client)", "Accept": "application/rss+xml, application/xml, text/xml"}
+    if source == "wikipedia":
+        from app.news.wikipedia import request_url
+        url = request_url(now)
+        headers = {"User-Agent": "ThreatMon/0.4 (https://github.com/ParsingMAINFRAME/ThreatMon; read-only metadata client)", "Accept": "application/json"}
     if cache and cache.response.fetched_at:
         if cache.etag:
             headers["If-None-Match"] = cache.etag
@@ -317,7 +327,7 @@ async def _fetch(client: httpx.AsyncClient, cache: NewsCache | None, now: dateti
     async with asyncio.timeout(45):
         for attempt in range(3):
             try:
-                async with client.stream("GET", config.feed_url, headers=headers, timeout=15, follow_redirects=False) as response:
+                async with client.stream("GET", url, headers=headers, timeout=15, follow_redirects=False) as response:
                     if response.status_code == 304:
                         if cache is None or cache.response.fetched_at is None:
                             raise NewsError(f"{config.name} returned an unchanged response without a cached snapshot")
@@ -363,7 +373,9 @@ async def ingest_news(path: Path | str, *, client: httpx.AsyncClient | None = No
     cache_seconds = config.cooldown
     try:
         from app.news.feeds import parse_gdacs_feed, parse_globalvoices_feed
-        parser = {"nasa": parse_nasa_feed, "globalvoices": parse_globalvoices_feed, "gdacs": parse_gdacs_feed}[source]
+        from app.news.wikipedia import parse_current_events
+        parser = {"nasa": parse_nasa_feed, "globalvoices": parse_globalvoices_feed, "gdacs": parse_gdacs_feed,
+                  "wikipedia": parse_current_events}[source]
         body, headers = await _fetch(client, cache, now, source)
         events, excluded = parser(body, retrieved_at=now) if body is not None else (previous.events, previous.duplicates_excluded)
         result = NewsResponse(edition="snapshot", as_of=now, fetched_at=now, last_attempt_at=now, fetch_state="ok",

@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     news_commands = news.add_subparsers(dest="news_command", required=True)
     news_ingest = news_commands.add_parser("ingest", help="Fetch or revalidate independent public RSS snapshots")
     news_ingest.add_argument("--cache-path", type=Path, help="NASA cache path; other feeds use deterministic sibling files")
-    news_ingest.add_argument("--source", choices=["all", "globalvoices", "gdelt", "gdacs", "nasa"], default="all")
+    news_ingest.add_argument("--source", choices=["all", "globalvoices", "gdelt", "wikipedia", "gdacs", "nasa"], default="all")
     news_poll = news_commands.add_parser("poll", help="Explicitly run one GDELT polling queue; never starts with the HTTP app")
     news_poll.add_argument("--source", choices=["gdelt"], default="gdelt")
     news_poll.add_argument("--cache-path", type=Path)

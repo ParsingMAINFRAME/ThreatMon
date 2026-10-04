@@ -23,6 +23,14 @@ The illustrative Iran/35-article scenario remains explicitly fictional. No speci
 
 Global Voices remains an independently fetched, attributed source under its existing policy. GDACS and NASA remain available in the secondary bulletin view. No new paid service, account or API key is required. Restricted BBC/Le Monde RSS feeds are not enabled.
 
+## Wikipedia Current events
+
+The [Current events portal](https://en.wikipedia.org/wiki/Portal:Current_events) is an editor-curated daily list of one-sentence entries, each citing sources. One bounded MediaWiki API request reads the pages for today and the two previous UTC days, with a descriptive User-Agent and the same 15-minute minimum interval. Only the incident-related sections are kept (armed conflicts and attacks, disasters and accidents, law and crime, politics and elections, health and environment, international relations), at most 120 entries.
+
+Entry text is written by Wikipedia contributors and reused under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) with attribution and a link to the portal page. It is not the linked publisher's headline. Each entry is stored against the first source URL it cites, so the reader can open the original report. The portal day is an editor-chosen event day and is kept as a provider timestamp, never as a publication time. Entries are placed and grouped by the same headline rules as every other article. Coverage depends on what volunteers have added and is incomplete.
+
+Al Jazeera and UN News feeds were reviewed and not enabled: their terms limit use to personal, non-commercial access.
+
 ## Articles versus provider observations
 
 A publisher article has a canonical URL identity. Preserve semantic query parameters such as article IDs; remove only known tracking parameters and fragments. Repeated observations do not create new articles. Retain richer publisher/author/license metadata and provider observations when the same canonical article appears through multiple sources.

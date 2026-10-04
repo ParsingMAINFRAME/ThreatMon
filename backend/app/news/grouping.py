@@ -35,7 +35,8 @@ COUNTRY_CLUES = (*COUNTRY_POINTS, *PLACE_QUALIFIERS)
 # Ordered: when a headline uses several incident words, the first matching kind names the event.
 INCIDENT_WORDS = {
     "attack": {"attack", "attacks", "attacked", "strike", "strikes", "airstrike", "airstrikes", "missile", "missiles",
-               "drone", "drones", "shelling", "shelled", "bomb", "bombs", "bombed", "bombing", "bombings", "rocket", "rockets"},
+               "drone", "drones", "shelling", "shelled", "bomb", "bombs", "bombed", "bombing", "bombings", "rocket", "rockets",
+               "struck", "raid", "raids", "ambush", "ambushed", "assault", "offensive", "massacre", "hostage", "hostages"},
     "explosion": {"explosion", "explosions", "blast", "blasts", "explodes", "exploded"},
     "shooting": {"shooting", "shootings", "gunfire", "gunman", "gunmen"},
     "unrest": {"riot", "riots", "rioting", "clashes", "unrest", "coup"},
@@ -131,6 +132,9 @@ def _resolve_place(text: str, places: tuple[str, ...], countries: frozenset[str]
     # A country is broad and often names an actor or destination, so it must be targeted or lead the headline.
     named = sorted(country for country in countries if country in COUNTRY_POINTS)
     chosen = _targeted(text, named)
+    if not chosen:  # "in Ras al-Maara, Syria": an unrecognized locality qualified by its country.
+        chosen = [country for country in named
+                  if re.search(r"(?<!\w)(?:in|near|at)\s+[^.;:]{2,60}?,\s+" + re.escape(_text(country)) + r"(?!\w)", text)]
     if not chosen and len(named) == 1 and text.startswith(_text(named[0])):
         chosen = named
     if len(chosen) != 1:

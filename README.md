@@ -16,7 +16,7 @@ Built with **Next.js, TypeScript, FastAPI, SQLAlchemy, and Alembic**. The interf
 
 | Available now | Boundary |
 | --- | --- |
-| Free, bounded GDELT discovery and attributed Global Voices headlines | A potentially capped article sample, not comprehensive incident coverage; broad queries can include irrelevant reporting. |
+| Free, bounded GDELT discovery, Wikipedia Current events entries and attributed Global Voices headlines | A potentially capped article sample, not comprehensive incident coverage; broad queries can include irrelevant reporting. |
 | Canonical URL deduplication, provider observations and conservative candidate matching | Publisher domains are not independent confirmations. Matching groups reports that name the same place and incident type within 24 hours; it has limited recall and can combine separate incidents. |
 | Numbered map markers, time filters, coverage panels and shareable selection URLs | Real articles are placed only at a city or country named in an incident headline, marked approximate and low confidence; a country marker is its rough centre, not its capital. Everything else stays unlocated. |
 | USGS/CISA signals and secondary GDACS/NASA bulletins | Different source classes and timestamp meanings remain separate. |
@@ -120,6 +120,7 @@ uv run --frozen python -m app.cli ingest --connector cisa_kev
 uv run --frozen python -m app.cli ingest --connector all
 uv run --frozen python -m app.cli news ingest --source all
 uv run --frozen python -m app.cli news ingest --source gdelt
+uv run --frozen python -m app.cli news ingest --source wikipedia
 uv run --frozen python -m app.cli news ingest --source globalvoices
 uv run --frozen python -m app.cli news ingest --source gdacs
 ```

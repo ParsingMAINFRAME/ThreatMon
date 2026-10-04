@@ -219,7 +219,7 @@ def test_bare_news_api_excludes_signal_sources_and_never_falls_back_to_demo(tmp_
     body = response.json()
     assert body["edition"] == "snapshot" and body["fetch_state"] == "never_fetched"
     assert body["events"] == [] and body["channel"] == "news"
-    assert {source["source_id"] for source in body["sources"]} == {"globalvoices", "gdelt"}
+    assert {source["source_id"] for source in body["sources"]} == {"globalvoices", "gdelt", "wikipedia"}
     assert [event["id"] for event in signals.json()["events"]] == [event.id for event in stored.events]
     assert all(not event["is_demo"] for event in signals.json()["events"])
 

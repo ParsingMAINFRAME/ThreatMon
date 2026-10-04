@@ -56,6 +56,7 @@ def test_same_city_and_incident_type_join_without_shared_names():
     ("Kyiv says Russian missiles hit Kharkiv", "Kharkiv, Ukraine (place named in headline)", (49.99, 36.23)),
     ("Explosion reported in Tripoli, Libya", "Tripoli, Libya (place named in headline)", (32.89, 13.19)),
     ("Blast heard in Kiev", "Kyiv, Ukraine (place named in headline)", (50.45, 30.52)),
+    ("Gunmen open fire on villagers in Marte, Borno State, Nigeria", "Nigeria (country named in headline)", (9.6, 8.1)),
 ])
 def test_single_headline_is_placed_at_the_named_place_with_low_confidence(headline, label, point):
     event = group_candidate_events([article("a", headline)])[0]
