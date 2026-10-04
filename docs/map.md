@@ -51,4 +51,6 @@ Made with [Natural Earth](https://www.naturalearthdata.com/). Its vector and ras
 | Source SHA-256 | `9e0729ee253ca7d7a5c4ae9395fb1902264c5377c52e224d13dd85010e2835d9` |
 | Local transformation | Equirectangular projection, coordinates rounded to 0.1 SVG unit |
 
+The news gazetteer also uses two Natural Earth 1:50m layers from the same commit for headline place reference points: [`ne_50m_populated_places_simple.geojson`](https://raw.githubusercontent.com/nvkelso/natural-earth-vector/693f11422f4e08d2da4566b854dda53eb7c39fb3/geojson/ne_50m_populated_places_simple.geojson) (SHA-256 `46e89429a78d5156cebe876d7011ec25d50003233f6d382dc8fd0ffd11d784b5`) and [`ne_50m_admin_0_countries.geojson`](https://raw.githubusercontent.com/nvkelso/natural-earth-vector/693f11422f4e08d2da4566b854dda53eb7c39fb3/geojson/ne_50m_admin_0_countries.geojson) (SHA-256 `2a6a5c1ab0ba1e7faa90e686a0500e08fb100d154c5b9ef37e9328991d4da2e5`). Country points are the area centroid of each country's largest polygon, never the capital. `backend/scripts/build_gazetteer.py` checks both hashes and regenerates `backend/app/news/gazetteer_natural_earth.py`.
+
 Natural Earth is a geographic base layer, not a source for the event claims or point coordinates. Its use implies no publisher endorsement of the application.
