@@ -23,6 +23,16 @@ The illustrative Iran/35-article scenario remains explicitly fictional. No speci
 
 Global Voices remains an independently fetched, attributed source under its existing policy. GDACS and NASA remain available in the secondary bulletin view. No new paid service, account or API key is required. Restricted BBC/Le Monde RSS feeds are not enabled.
 
+## GDELT bulk files (default)
+
+The DOC search API answered this project with HTTP 429 for every request over many hours, including a single small query. GDELT's rate-limit message directs such users to its published datasets, so the default `NEWS_GDELT_MODE=bulk` reads the [GDELT 2.0](https://blog.gdeltproject.org/gdelt-2-0-our-global-world-in-realtime/) Global Knowledge Graph files instead. GDELT publishes one file every 15 minutes listing the articles it monitored. No search API call is made in this mode.
+
+An import reads `lastupdate.txt` for the newest file time, builds file URLs locally on the fixed `data.gdeltproject.org` host, and downloads at most four unread files (one hour), oldest first. Downloads are capped at 16 MiB zipped and 96 MiB unzipped, with a single archive member. A persisted watermark means a later import reads only newer files; skipped older files mark the source as possibly incomplete. The 15-minute minimum interval and failure handling are unchanged.
+
+From each record only the page title, URL, publisher domain and file time are kept. A record is retained only when the headline rules can place it and GDELT's own location list for the article names the same country. A headline that also names a US state or Canadian province is not placed at a foreign city. Same-name towns remain a known error: GDELT itself geocoded a shooting in Athens, Alabama to Greece, and that headline was placed at Athens, Greece. GDELT coordinates are never used. The 250-article, seven-day retention still applies. Expect a handful of placed headlines per file, so regular polling is what builds coverage.
+
+Set `NEWS_GDELT_MODE=doc` to use the DOC search API described below.
+
 ## Wikipedia Current events
 
 The [Current events portal](https://en.wikipedia.org/wiki/Portal:Current_events) is an editor-curated daily list of one-sentence entries, each citing sources. One bounded MediaWiki API request reads the pages for today and the two previous UTC days, with a descriptive User-Agent and the same 15-minute minimum interval. Only the incident-related sections are kept (armed conflicts and attacks, disasters and accidents, law and crime, politics and elections, health and environment, international relations), at most 120 entries.

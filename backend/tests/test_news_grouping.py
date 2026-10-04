@@ -83,6 +83,7 @@ def test_country_marker_is_a_rough_centre_and_never_the_capital():
     "Iran and Israel trade attacks",  # two countries, neither targeted
     "Anniversary of Orion chemical plant explosion in Tehran",  # historical
     "Experts warn of risk of attack in London",  # speculative
+    "Georgia homecoming party shooting: 2 dead in Vienna",  # a US state signals a same-name town
     "Rail strike halts trains in Paris",  # labour dispute
     "Minister under fire in London over budget",  # figure of speech
     "Heart attack deaths rise in India",  # medical
