@@ -14,6 +14,22 @@ export function coverageIntensity(articleCount: number): NewsCoverageIntensity {
   return COVERAGE_INTENSITY_BANDS.find((band) => articleCount >= band.minimum && articleCount <= band.maximum)?.intensity ?? "none";
 }
 
+export type NewsEventTypeGroup = "conflict" | "unrest" | "disaster" | "accident" | "other";
+
+/** Map legend order. Color names the reported event type, never severity, certainty or verified impact. */
+export const NEWS_EVENT_TYPE_GROUPS: readonly { group: NewsEventTypeGroup; label: string; categories: readonly string[] }[] = [
+  { group: "conflict", label: "Attacks, strikes & shootings", categories: ["attack", "explosion", "shooting"] },
+  { group: "unrest", label: "Unrest & protests", categories: ["unrest", "protest"] },
+  { group: "disaster", label: "Natural hazards & fires", categories: ["earthquake", "flood", "fire", "wildfire", "tropical_cyclone", "drought", "volcano", "natural_hazard"] },
+  { group: "accident", label: "Accidents & outages", categories: ["collision", "outage"] },
+  { group: "other", label: "Other news", categories: [] },
+];
+
+export function newsEventTypeGroup(category: string): NewsEventTypeGroup {
+  const key = category.trim().toLowerCase();
+  return NEWS_EVENT_TYPE_GROUPS.find((entry) => entry.categories.includes(key))?.group ?? "other";
+}
+
 function timestamp(value: string | null): number | null {
   if (!value || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return null;
   const time = Date.parse(value);

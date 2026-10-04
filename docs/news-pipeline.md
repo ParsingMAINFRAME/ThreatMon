@@ -11,7 +11,21 @@ The primary product is collected incident reporting, separate from the hazard an
 | 31+ | Red / high coverage intensity |
 | 0 or official reports only | Neutral / no news-article band |
 
-The policy is shared by map markers, event cards and the legend. The number must equal the retained article list for that event after filters. Global totals are a union of article identities, not a sum of overlapping groups. Spatial controls labeled “N events” group separate events for navigation and remain neutral. Neither color nor publisher breadth establishes physical severity or independent confirmation. Detail panels preserve separate severity, reporting status and grouping confidence.
+The policy is used by event cards. Map markers instead take their color from the reported event type (see below) and show the same article count as their number and size. The number must equal the retained article list for that event after filters. Global totals are a union of article identities, not a sum of overlapping groups. Spatial controls labeled “N events” group separate events for navigation and remain neutral. Neither color nor publisher breadth establishes physical severity or independent confirmation. Detail panels preserve separate severity, reporting status and grouping confidence.
+
+## Map marker colors
+
+Map marker color names the event type from the event's category, so the map reads at a glance:
+
+| Color | Event type | Categories |
+| --- | --- | --- |
+| Red | Attacks, strikes and shootings | attack, explosion, shooting |
+| Orange | Unrest and protests | unrest, protest |
+| Blue | Natural hazards and fires | earthquake, flood, fire, wildfire, tropical_cyclone, drought, volcano, natural_hazard |
+| Purple | Accidents and outages | collision, outage |
+| Gray | Other news | anything else |
+
+The mapping lives in `newsEventTypeGroup` in `frontend/src/lib/news-view.ts` and is tested. Color describes what the headlines report, not severity, certainty or verified impact; a red marker can be one unverified headline.
 
 The illustrative Iran/35-article scenario remains explicitly fictional. No specific contemporary attack, casualty count or city location is invented to fill the map.
 
