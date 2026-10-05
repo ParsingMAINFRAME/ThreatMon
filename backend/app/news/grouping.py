@@ -18,8 +18,8 @@ import json
 import re
 import unicodedata
 
-from app.news.gazetteer import CITY_ALIASES, CITY_POINTS, COUNTRY_POINTS
-from app.news.models import NewsArticle, NewsEvent, NewsLocation
+from app.news.gazetteer import CITY_ALIASES, CITY_POINTS, COUNTRY_POINTS, _distance_km
+from app.news.models import LinkedPlace, NewsArticle, NewsEvent, NewsLocation
 
 
 GROUPING_VERSION = "headline-place-v4"
@@ -152,7 +152,8 @@ class _Place:
     label: str
     lat: float
     lon: float
-    level: str  # "city", "country", or "topic" (a country named only in an editor's topic heading)
+    level: str  # "city", "country", "topic" (a country named only in an editor's topic heading) or "linked"
+    source_url: str | None = None  # The linked place article, for "linked" places.
 
 
 def _targeted(text: str, names: list[str]) -> list[str]:
@@ -185,6 +186,31 @@ def _resolve_place(text: str, places: tuple[str, ...], countries: frozenset[str]
         return None
     lat, lon = COUNTRY_POINTS[chosen[0]]
     return _Place(chosen[0], lat, lon, "country")
+
+
+# Finer places first. An article about one event (a named bombing) carries its own coordinate; towns,
+# landmarks and stations are peers, so two of them in one entry are ambiguous; administrative areas are coarser.
+LINKED_PLACE_RANKS = {"event": 0, "city": 1, "landmark": 1, "airport": 1, "railwaystation": 1, "edu": 1, "isle": 1,
+                      "adm3rd": 2, "adm2nd": 3, "adm1st": 4, "state": 4}
+MAX_LINKED_SPREAD_KM = 400
+
+
+def _linked_place(linked: list[LinkedPlace], text_place: _Place | None) -> _Place | None:
+    """The one finest place article an entry links to, when every other linked place and any city named in the
+    text lie nearby. Distant links ("from Belgorod on Kharkiv") or two peer places leave the text rules in charge."""
+    if not linked:
+        return None
+    finest = min(LINKED_PLACE_RANKS[place.place_type] for place in linked)
+    chosen = [place for place in linked if LINKED_PLACE_RANKS[place.place_type] == finest]
+    if len({place.title for place in chosen}) != 1:
+        return None
+    place = chosen[0]
+    others = [(other.lat, other.lon) for other in linked]
+    if text_place is not None and text_place.level == "city":
+        others.append((text_place.lat, text_place.lon))
+    if any(_distance_km((place.lat, place.lon), other) > MAX_LINKED_SPREAD_KM for other in others):
+        return None
+    return _Place(place.title, place.lat, place.lon, "linked", place.url)
 
 
 def _topic_place(topics: list[str]) -> _Place | None:
@@ -260,6 +286,8 @@ def _clues(article: NewsArticle) -> _Clues:
                                for observation in article.observations)
     # A place is only attached to a headline that reports an incident now, not to any story naming a place.
     place = _resolve_place(text, places, countries) if reported else None
+    if reported:
+        place = _linked_place(article.linked_places, place) or place
     if reported and place is None and not places and not countries:
         place = _topic_place(article.editor_topics)
     eligible = (place is not None and time is not None and not conflicting_provider_times and not unsupported_language
@@ -291,6 +319,12 @@ def _digest(value: object) -> str:
 
 
 def _location(place: _Place, source_url: str | None) -> NewsLocation:
+    if place.level == "linked":
+        return NewsLocation(
+            lat=place.lat, lon=place.lon, label=f"{place.label} (linked Wikipedia place)",
+            precision="approximate_area", confidence="low", source_url=place.source_url,
+            basis=("The curated entry links to the Wikipedia article for this place; the marker is that article's own reference "
+                   "coordinate. It is finer than a city or country centre but still not a verified incident site."))
     if place.level == "city":
         return NewsLocation(
             lat=place.lat, lon=place.lon, label=f"{place.label} (place named in headline)",

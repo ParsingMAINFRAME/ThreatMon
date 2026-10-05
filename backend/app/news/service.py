@@ -378,8 +378,12 @@ async def ingest_news(path: Path | str, *, client: httpx.AsyncClient | None = No
                   "wikipedia": parse_current_events}[source]
         body, headers = await _fetch(client, cache, now, source)
         events, excluded = parser(body, retrieved_at=now) if body is not None else (previous.events, previous.duplicates_excluded)
+        warning = None
+        if source == "wikipedia" and body is not None:
+            from app.news.wikipedia import add_linked_places
+            events, warning = await add_linked_places(client, events)
         result = NewsResponse(edition="snapshot", as_of=now, fetched_at=now, last_attempt_at=now, fetch_state="ok",
-                              error=None, events=events, duplicates_excluded=excluded, source_note=config.coverage_note)
+                              error=warning, events=events, duplicates_excluded=excluded, source_note=config.coverage_note)
         cache_seconds = _cache_seconds(headers, config.cooldown)
         result = _with_status(result, source, _next_fetch(now, cache_seconds))
         stored = NewsCache(response=result, etag=headers.get("etag") or (cache.etag if cache and body is None else None),

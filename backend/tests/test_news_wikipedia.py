@@ -96,6 +96,8 @@ def test_unexpected_responses_fail_the_source(payload):
 def test_ingest_stores_wikipedia_entries_in_the_news_channel(tmp_path):
     def handler(request):
         assert request.url.host == "en.wikipedia.org" and "ThreatMon" in request.headers["user-agent"]
+        if "prop=coordinates" in str(request.url):
+            return httpx.Response(200, content=coordinate_body([coordinate_page("Kyiv", 50.45, 30.52, "city")]))
         return httpx.Response(200, content=body(page()))
 
     async def run():
@@ -104,7 +106,8 @@ def test_ingest_stores_wikipedia_entries_in_the_news_channel(tmp_path):
     asyncio.run(run())
     news = read_sources(tmp_path / "news.json", now=NOW, channel="news")
     status = next(source for source in news.sources if source.source_id == "wikipedia")
-    assert status.state == "ok" and status.item_count == 3 and status.kind == "discovery"
+    assert status.state == "ok" and status.error is None and status.item_count == 3 and status.kind == "discovery"
+    assert any(event.location and event.location.label == "Kyiv (linked Wikipedia place)" for event in news.events)
     assert sum(event.scope == "located" for event in news.events) == 3
     assert read_sources(tmp_path / "news.json", now=NOW, channel="signals").events == []
 
@@ -154,3 +157,95 @@ def test_armed_conflict_section_names_the_event_type_and_a_topic_country_places_
     assert placed["four.example"].category == "attack" and placed["four.example"].scope == "unlocated"
     # Outside the armed-conflict section an entry still needs an incident word.
     assert placed["five.example"].scope == "unlocated" and placed["five.example"].category == "News report"
+
+
+from app.news.models import LinkedPlace  # noqa: E402
+from app.news.wikipedia import add_linked_places, coordinates_url, parse_coordinates  # noqa: E402
+
+
+def coordinate_body(pages, normalized=(), redirects=()):
+    query = {"pages": pages}
+    if normalized:
+        query["normalized"] = [{"from": a, "to": b} for a, b in normalized]
+    if redirects:
+        query["redirects"] = [{"from": a, "to": b} for a, b in redirects]
+    return json.dumps({"batchcomplete": True, "query": query}).encode()
+
+
+def coordinate_page(title, lat, lon, kind, **extra):
+    return {"pageid": 1, "ns": 0, "title": title, "coordinates": [{"lat": lat, "lon": lon, "primary": True, "globe": "earth", "type": kind, **extra}]}
+
+
+def test_coordinate_lookup_is_one_bounded_request_per_fifty_titles():
+    url = coordinates_url(["Sagaing Region", "Kyiv"])
+    assert url.startswith("https://en.wikipedia.org/w/api.php?action=query&prop=coordinates&coprimary=primary")
+    assert "colimit=max" in url and "redirects=1" in url and "Sagaing%20Region%7CKyiv" in url
+
+
+def test_coordinates_follow_redirects_and_keep_only_place_types():
+    places = parse_coordinates(coordinate_body([
+        coordinate_page("Kyiv", 50.45, 30.5236, "city(2950000)"),
+        coordinate_page("Ukraine", 49.0, 32.0, "country"),
+        coordinate_page("Dnieper", 46.5, 32.3, "river"),
+        coordinate_page("Sagaing Region", 22.0, 95.0, "adm1st"),
+        {"pageid": 4, "ns": 0, "title": "Tatmadaw"},
+        {"ns": 0, "title": "Missing page", "missing": True},
+    ], normalized=[("kyiv", "Kyiv")], redirects=[("Kiev", "Kyiv")]))
+    assert set(places) == {"Kyiv", "kyiv", "Kiev", "Sagaing Region"}
+    assert places["Kiev"] == LinkedPlace(title="Kyiv", lat=50.45, lon=30.5236, place_type="city", url="https://en.wikipedia.org/wiki/Kyiv")
+    assert places["Sagaing Region"].url == "https://en.wikipedia.org/wiki/Sagaing_Region"
+    with pytest.raises(NewsError):
+        parse_coordinates(b"{}")
+
+
+def linked_entries(handler):
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            events, _ = parse_current_events(body(page(text=TOPIC_WIKITEXT)), retrieved_at=NOW)
+            return await add_linked_places(client, events)
+    return asyncio.run(run())
+
+
+def test_linked_place_coordinates_give_a_finer_position_than_the_country():
+    def handler(request):
+        assert "prop=coordinates" in str(request.url)
+        return httpx.Response(200, content=coordinate_body([
+            coordinate_page("Sagaing Region", 22.0, 95.0, "adm1st"), coordinate_page("Myanmar", 21.0, 96.0, "country")]))
+    events, warning = linked_entries(handler)
+    assert warning is None
+    placed = {event.articles[0].publisher_id: event for event in group_candidate_events([event.articles[0] for event in events])}
+    town = placed["two.example"]
+    assert town.location.label == "Sagaing Region (linked Wikipedia place)"
+    assert (town.location.lat, town.location.lon) == (22.0, 95.0)
+    assert town.location.source_url == "https://en.wikipedia.org/wiki/Sagaing_Region"
+    assert "not a verified incident site" in town.location.basis and town.location.confidence == "low"
+    assert placed["one.example"].location.label == "Myanmar (country named in topic heading)"
+
+
+def test_a_failed_coordinate_lookup_keeps_entries_and_says_why():
+    events, warning = linked_entries(lambda request: httpx.Response(503))
+    assert len(events) == 5 and all(not event.articles[0].linked_places for event in events)
+    assert warning == "Wikipedia coordinate lookup returned HTTP 503; entries kept without linked place coordinates"
+
+
+def linked(title, lat, lon, kind="city"):
+    return LinkedPlace(title=title, lat=lat, lon=lon, place_type=kind, url=f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}")
+
+
+@pytest.mark.parametrize("headline,places,label", [
+    # One linked town the gazetteer does not know.
+    ("Drones strike an oil depot in Liski, Russia.", [linked("Liski", 50.98, 39.5)], "Liski (linked Wikipedia place)"),
+    # A named attack article carries its own coordinate and outranks the town it happened in.
+    ("A bombing at a market kills nine in Quetta.", [linked("2026 Quetta market bombing", 30.19, 67.01, "event"), linked("Quetta", 30.18, 67.0)],
+     "2026 Quetta market bombing (linked Wikipedia place)"),
+    # A region link beats a city read from the link's display text ("Kharkiv region").
+    ("Shelling hits villages in the Kharkiv region.", [linked("Kharkiv Oblast", 49.5, 36.5, "adm1st")], "Kharkiv Oblast (linked Wikipedia place)"),
+    # Two peer towns, or a town far from the city the text names, leave the text rules in charge.
+    ("Missiles launched from Belgorod strike Kharkiv.", [linked("Belgorod", 50.6, 36.59), linked("Kharkiv", 49.99, 36.23)],
+     "Kharkiv, Ukraine (place named in headline)"),
+    ("A drone attack hits Moscow.", [linked("Vladivostok", 43.1, 131.9)], "Moscow, Russia (place named in headline)"),
+])
+def test_linked_place_rules(headline, places, label):
+    article = parse_current_events(body(page()), retrieved_at=NOW)[0][0].articles[0].model_copy(
+        update={"headline": headline, "linked_places": places, "editor_topics": []})
+    assert group_candidate_events([article])[0].location.label == label
