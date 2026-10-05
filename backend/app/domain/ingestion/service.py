@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import uuid4
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.connectors.http import FeedError
@@ -120,8 +121,9 @@ def record_run(session: Session, *, connector: str, data_mode: str, started_at: 
                success: bool, item_count: int = 0, counts: IngestionCounts | None = None,
                error: str | None = None) -> IngestionRunRecord:
     counts = counts or IngestionCounts()
+    sequence = (session.scalar(select(func.max(IngestionRunRecord.sequence))) or 0) + 1
     run = IngestionRunRecord(
-        id=str(uuid4()), connector=connector, data_mode=data_mode, started_at=started_at,
+        id=str(uuid4()), sequence=sequence, connector=connector, data_mode=data_mode, started_at=started_at,
         finished_at=utc_now(), success=success, item_count=item_count,
         inserted_count=counts.inserted, updated_count=counts.updated, unchanged_count=counts.unchanged,
         error=error,

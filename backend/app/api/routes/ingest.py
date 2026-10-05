@@ -17,10 +17,10 @@ def list_connectors(db: Session = Depends(get_db)) -> dict[str, object]:
     for name in registry.names():
         connector = registry.get(name)
         latest = db.scalar(select(IngestionRunRecord).where(IngestionRunRecord.connector == name,
-                           IngestionRunRecord.data_mode == "live").order_by(IngestionRunRecord.started_at.desc()).limit(1))
+                           IngestionRunRecord.data_mode == "live").order_by(IngestionRunRecord.sequence.desc(), IngestionRunRecord.started_at.desc()).limit(1))
         successful = db.scalar(select(IngestionRunRecord).where(IngestionRunRecord.connector == name,
                               IngestionRunRecord.data_mode == "live", IngestionRunRecord.success.is_(True))
-                              .order_by(IngestionRunRecord.finished_at.desc()).limit(1))
+                              .order_by(IngestionRunRecord.sequence.desc(), IngestionRunRecord.finished_at.desc()).limit(1))
         connectors.append({
             "name": name, "feed_url": connector.feed_url, "description": connector.description,
             "state": "never_run" if latest is None else "ok" if latest.success else "error",

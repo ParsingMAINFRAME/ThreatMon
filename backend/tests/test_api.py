@@ -165,6 +165,15 @@ def test_failed_refresh_exposes_previous_success_and_fixture_does_not_fake_live(
     assert client.get("/threats", params={"data_mode": "live"}).json()["total"] == 1
 
 
+def test_latest_run_follows_recording_order_when_timestamps_tie(client, db_engine, feed_fixture, monkeypatch):
+    # Coarse clocks (e.g. Windows) can give a quick success and the failure after it identical timestamps.
+    from datetime import UTC, datetime
+    import app.domain.ingestion.service as ingestion_service
+
+    monkeypatch.setattr(ingestion_service, "utc_now", lambda: datetime(2026, 10, 4, 7, 5, tzinfo=UTC))
+    test_failed_refresh_exposes_previous_success_and_fixture_does_not_fake_live(client, db_engine, feed_fixture)
+
+
 def test_snapshot_fingerprints_all_matching_cards_before_pagination(client):
     import hashlib
     import json

@@ -24,7 +24,7 @@ def test_migration_recognizes_old_scaffold_and_preserves_data(tmp_path):
     with engine.connect() as connection:
         row = connection.execute(text("SELECT title, provenance FROM source_items WHERE id='legacy'")).one()
         assert row.title == "Old source" and row.provenance == "{}"
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0003_map_locations"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0004_ingestion_run_sequence"
     assert "ingestion_runs" in inspect(engine).get_table_names()
     init_db(seed_demo=False, bind=engine)
     engine.dispose()
