@@ -128,6 +128,22 @@ def test_a_missing_window_file_is_skipped_and_marks_coverage_incomplete(tmp_path
     result = run(tmp_path / "news.json", handler)
     status = result.sources[0]
     assert result.fetch_state == "ok" and status.item_count == 1 and status.possibly_truncated
+
+    # The newest listed file is not uploaded yet: nothing is lost, and the next import asks for it again.
+    def not_yet(request):
+        if request.url.path.endswith("lastupdate.txt"):
+            return httpx.Response(200, content=LASTUPDATE)
+        return httpx.Response(404) if "214500" in request.url.path else httpx.Response(200, content=archive())
+    pending = run(tmp_path / "pending.json", not_yet)
+    assert pending.fetch_state == "ok" and not pending.sources[0].possibly_truncated
+    assert pending.sources[0].query_window_end == LATEST - timedelta(minutes=15)
+    calls = []
+    def published(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, content=LASTUPDATE if request.url.path.endswith("lastupdate.txt") else archive(*ROWS))
+    caught_up = run(tmp_path / "pending.json", published, NOW + timedelta(minutes=16))
+    assert [path for path in calls if "gkg" in path] == ["/gdeltv2/20261004214500.gkg.csv.zip"]
+    assert caught_up.sources[0].item_count == 1
     missing = run(tmp_path / "other.json", lambda request: httpx.Response(404))
     assert missing.fetch_state == "error" and "HTTP 404" in missing.sources[0].error
 

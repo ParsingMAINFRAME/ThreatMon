@@ -543,17 +543,22 @@ async def ingest_gdelt_bulk(path: Path | str, *, client: httpx.AsyncClient | Non
                 raise NewsError("GDELT listed a file dated in the future")
             times, skipped = file_times(latest, watermark)
             new_articles = []
+            read_times = []
             for time in times:
                 try:
                     body = await _download(client, file_url(time), MAX_ZIP_BYTES, now)
                 except NewsFileMissing:
-                    skipped = True  # GDELT occasionally publishes no file for a window; the others are still read.
-                    continue
+                    continue  # The newest listed file is often not uploaded yet; the others are still read.
                 new_articles.extend(parse_gkg_file(body, file_time=time, retrieved_at=now))
-        if times:
-            start, end = times[0] - timedelta(minutes=15), times[-1]
+                read_times.append(time)
+        if read_times:
+            start, end = read_times[0] - timedelta(minutes=15), read_times[-1]
+            # A missing file older than one that was read is a real gap; a missing newest file is retried next import.
+            skipped = skipped or any(time < read_times[-1] and time not in read_times for time in times)
+            latest = read_times[-1]
         else:
-            start, end = cache.query_window_start, cache.query_window_end
+            start, end = (cache.query_window_start, cache.query_window_end) if cache else (None, None)
+            latest = watermark
         existing = [article for event in previous.events for article in event.articles]
         combined = merge_articles([*existing, *new_articles])
         recent = [article for article in combined if (article.first_seen_at or article.retrieved_at) >= now - timedelta(days=7)]
