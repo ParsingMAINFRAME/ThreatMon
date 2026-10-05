@@ -107,3 +107,28 @@ def test_poll_delay_respects_provider_backoff_and_interval(tmp_path):
 def test_unsupported_poll_interval_rejected_without_starting_worker(tmp_path, interval):
     with pytest.raises(ValueError):
         asyncio.run(poll_news(tmp_path / "news.json", interval_seconds=interval))
+
+
+def test_a_lock_left_by_this_pid_on_this_host_is_reclaimed_after_a_restart(tmp_path, monkeypatch):
+    import os
+    import socket
+    from app.news import polling
+    path = tmp_path / "news.json"
+    lock = path.with_name("news.json.lock")
+    monkeypatch.setattr(polling, "utc_now", lambda: NOW)
+    unexpired = int(NOW.timestamp()) + 3600
+    # A killed container restarts its poller as the same PID on the same host; that earlier owner is dead.
+    lock.write_bytes(f"{os.getpid()} killed-run {unexpired} {socket.gethostname()}\n".encode())
+    with news_lock(path):
+        assert lock.read_bytes().split()[3] == socket.gethostname().encode()
+        with pytest.raises(NewsLockError):
+            with news_lock(path):
+                pytest.fail("a lock this process holds is never reclaimed by a nested claim")
+    assert not lock.exists()
+    for owner in (f"{os.getpid() + 1} other-pid {unexpired} {socket.gethostname()}",
+                  f"{os.getpid()} other-host {unexpired} some-other-host",
+                  f"{os.getpid()} no-host {unexpired}"):
+        lock.write_bytes(f"{owner}\n".encode())
+        with pytest.raises(NewsLockError):
+            with news_lock(path):
+                pytest.fail(f"an unexpired lock from another owner is kept: {owner}")

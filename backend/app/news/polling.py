@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime
 import os
 from pathlib import Path
+import socket
 import uuid
 
 from app.core.time import utc_now
@@ -14,6 +15,8 @@ from app.news.service import ingest_sources
 
 # A one-shot import finishes well inside this; a poller renews its claim past each wait.
 LOCK_SECONDS = 600
+# Lock identities held by this process, so a nested claim is never mistaken for a dead earlier owner.
+_HELD_IDENTITIES: set[str] = set()
 
 
 class NewsLockError(RuntimeError):
@@ -27,8 +30,10 @@ def news_lock(path: Path | str):
     lock = target.with_name(target.name + ".lock")
     identity = f"{os.getpid()} {uuid.uuid4().hex}"
 
+    host = socket.gethostname().replace(" ", "_") or "unknown"
+
     def token(seconds: float) -> bytes:
-        return f"{identity} {int(utc_now().timestamp() + seconds)}\n".encode("ascii")
+        return f"{identity} {int(utc_now().timestamp() + seconds)} {host}\n".encode("ascii")
 
     def create() -> int:
         return os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -36,12 +41,17 @@ def news_lock(path: Path | str):
         descriptor = create()
     except FileExistsError as error:
         # An owner that was killed cannot release its lock. Each owner writes when its claim expires and a
-        # poller renews it every cycle, so only a lock past its own expiry is reclaimed.
+        # poller renews it every cycle, so a lock past its own expiry is reclaimed. A lock written on this host
+        # under this process's own PID by an identity this process does not hold is also dead: a restarted
+        # container runs its poller as PID 1 again, and no other live process can share that PID.
         try:
-            expired = int(lock.read_bytes().split()[2]) < utc_now().timestamp()
-        except (OSError, IndexError, ValueError):
-            expired = False  # Unreadable or older-format locks still require operator verification.
-        if not expired:
+            fields = lock.read_bytes().decode("ascii").split()
+            expired = int(fields[2]) < utc_now().timestamp()
+            dead_earlier_self = (len(fields) >= 4 and fields[0] == str(os.getpid()) and fields[3] == host
+                                 and f"{fields[0]} {fields[1]}" not in _HELD_IDENTITIES)
+        except (OSError, IndexError, ValueError, UnicodeDecodeError):
+            expired = dead_earlier_self = False  # Unreadable or older-format locks still require operator verification.
+        if not (expired or dead_earlier_self):
             raise NewsLockError("Another news import or poller holds this cache lock. A leftover lock requires operator verification before removal.") from error
         lock.unlink(missing_ok=True)
         try:
@@ -56,8 +66,10 @@ def news_lock(path: Path | str):
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(token(LOCK_SECONDS))
             stream.flush()
+        _HELD_IDENTITIES.add(identity)
         yield renew
     finally:
+        _HELD_IDENTITIES.discard(identity)
         try:
             if lock.read_bytes().startswith(identity.encode("ascii")):
                 lock.unlink()
