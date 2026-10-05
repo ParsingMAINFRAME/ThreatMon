@@ -66,6 +66,21 @@ export type NewsArticle = {
   license_url?: string | null;
   source_window_start?: string | null;
   source_window_end?: string | null;
+  editor_section?: string | null;
+  editor_topics?: string[];
+  linked_titles?: string[];
+};
+
+export type PlacementReview = {
+  article_url: string;
+  action: "confirmed" | "moved" | "removed";
+  note: string;
+  reviewer: string;
+  reviewed_at: string;
+  reviewed_label?: string | null;
+  lat?: number | null;
+  lon?: number | null;
+  place_label?: string | null;
 };
 
 export type NewsEvent = {
@@ -86,6 +101,7 @@ export type NewsEvent = {
   grouping_status?: "source_event" | "single_source" | "candidate";
   grouping_version?: string | null;
   assignment_revision?: string | null;
+  placement_review?: PlacementReview | null;
   place_hints?: string[];
 };
 

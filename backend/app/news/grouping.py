@@ -18,11 +18,11 @@ import json
 import re
 import unicodedata
 
-from app.news.gazetteer import CITY_ALIASES, CITY_POINTS, COUNTRY_POINTS
-from app.news.models import NewsArticle, NewsEvent, NewsLocation
+from app.news.gazetteer import CITY_ALIASES, CITY_POINTS, COUNTRY_POINTS, _distance_km
+from app.news.models import LinkedPlace, NewsArticle, NewsEvent, NewsLocation
 
 
-GROUPING_VERSION = "headline-place-v3"
+GROUPING_VERSION = "headline-place-v4"
 MAX_GROUP_ARTICLES = 250
 MAX_INPUT_ARTICLES = 1000
 MAX_TIME_SPAN = timedelta(hours=24)
@@ -51,15 +51,25 @@ INCIDENT_WORDS = {
     "fire": {"fire", "fires", "blaze", "blazes", "wildfire", "wildfires"},
     "flood": {"flood", "floods", "flooding"},
     "earthquake": {"earthquake", "earthquakes", "quake", "quakes"},
+    "storm": {"cyclone", "cyclones", "typhoon", "typhoons", "hurricane", "hurricanes", "tornado", "tornadoes", "storm", "storms"},
+    "landslide": {"landslide", "landslides", "mudslide", "mudslides", "avalanche", "avalanches"},
+    "volcano": {"eruption", "eruptions", "erupts", "erupted", "volcano", "volcanic"},
     "outage": {"outage", "outages", "blackout", "blackouts"},
-    "collision": {"collision", "collisions", "crash", "crashes"},
+    "collision": {"collision", "collisions", "crash", "crashes", "derailment", "derails", "derailed", "capsizes", "capsized",
+                  "shipwreck", "sinks", "sank", "collapse", "collapses", "collapsed", "stampede", "stampedes"},
 }
+# Curated listings file entries under editor-chosen sections. An entry in this section reports an attack or armed
+# clash even when its sentence uses none of the incident words above ("Militants kill 12 soldiers in ...").
+EDITOR_SECTION_KINDS = {"armed conflicts and attacks": "attack"}
 # Common non-incident uses of incident words. Fallible and English-only: it reduces, not removes, false matches.
 NOT_AN_INCIDENT = re.compile(
     r"\b(?:heart attacks?|panic attacks?|attack ads?|on strike|strike action|hunger strikes?|"
     r"(?:labou?r|union|workers?|teachers?|doctors?|nurses?|transit|rail|train|bus|pilots?|general|writers?|actors?|port|dock) strikes?|"
     r"strikes? (?:a )?(?:deal|balance|tone|chord|gold|late|early|first|twice|back|again)|fires? (?:coach|manager|ceo|chief|minister|staff|employees?|workers?)|"
-    r"under fire|fire sale|market crash|stock crash|crash(?:es)? out|flood(?:s|ing)? of|box office|"
+    r"under fire|fire sale|market crash|stock crash|crash(?:es)? out|flood(?:s|ing)? of|box office|storms? of|political storm|by storm|"
+    r"(?:talks|deal|negotiations|government|coalition|economy|market|currency|ceasefire) collapsed?|collapses? (?:of|in) (?:talks|support|prices?)|"
+    r"landslide (?:win|victory|election|vote|defeat|majority)|avalanche of|"
+    r"(?:stocks?|shares?|markets?|prices?|currency|rupee|dollar|euro|pound|yen|ratings?|polls?) (?:sinks?|sank)|"
     r"goals?|striker|cup|league|match|odi|wickets?|innings|playoffs?|championship|touchdown|quarterback)\b", re.IGNORECASE)
 # Publication and place names that contain another place's name; removed before place recognition.
 NOT_A_PLACE = re.compile(
@@ -142,7 +152,8 @@ class _Place:
     label: str
     lat: float
     lon: float
-    level: str  # "city" or "country"
+    level: str  # "city", "country", "topic" (a country named only in an editor's topic heading) or "linked"
+    source_url: str | None = None  # The linked place article, for "linked" places.
 
 
 def _targeted(text: str, names: list[str]) -> list[str]:
@@ -175,6 +186,54 @@ def _resolve_place(text: str, places: tuple[str, ...], countries: frozenset[str]
         return None
     lat, lon = COUNTRY_POINTS[chosen[0]]
     return _Place(chosen[0], lat, lon, "country")
+
+
+# Finer places first. An article about one event (a named bombing) carries its own coordinate; towns,
+# landmarks and stations are peers, so two of them in one entry are ambiguous; administrative areas are coarser.
+LINKED_PLACE_RANKS = {"event": 0, "city": 1, "landmark": 1, "airport": 1, "railwaystation": 1, "edu": 1, "isle": 1,
+                      "adm3rd": 2, "adm2nd": 3, "adm1st": 4, "state": 4}
+MAX_LINKED_SPREAD_KM = 400
+
+
+def _linked_place(linked: list[LinkedPlace], text_place: _Place | None) -> _Place | None:
+    """The one finest place article an entry links to, when every other linked place and any city named in the
+    text lie nearby. Distant links ("from Belgorod on Kharkiv") or two peer places leave the text rules in charge."""
+    if not linked:
+        return None
+    finest = min(LINKED_PLACE_RANKS[place.place_type] for place in linked)
+    chosen = [place for place in linked if LINKED_PLACE_RANKS[place.place_type] == finest]
+    if len({place.title for place in chosen}) != 1:
+        return None
+    place = chosen[0]
+    others = [(other.lat, other.lon) for other in linked]
+    if text_place is not None and text_place.level == "city":
+        others.append((text_place.lat, text_place.lon))
+    if any(_distance_km((place.lat, place.lon), other) > MAX_LINKED_SPREAD_KM for other in others):
+        return None
+    return _Place(place.title, place.lat, place.lon, "linked", place.url)
+
+
+def _topic_place(topics: list[str]) -> _Place | None:
+    """The one country an entry's topic headings name, for an entry whose own text names no place at all.
+
+    "Russian invasion of Ukraine" or "Myanmar civil war" locate the country, not the entry; a city in a heading
+    ("Gaza war") counts only as its country. Headings that pair parties ("Israel–Hezbollah conflict") or name
+    several countries locate nothing, because the entry may concern either side.
+    """
+    found: set[str] = set()
+    for topic in topics:
+        text = NOT_A_PLACE.sub(" ", re.sub(r"\([^)]*\)", " ", _text(topic)))  # "(2021–present)" is a date range, not a pairing.
+        if re.search(r"[–—]|\b(?:and|versus|vs|relations)\b", text):
+            continue
+        found.update(country for country in COUNTRY_INDEX.found(text) if country in COUNTRY_POINTS)
+        found.update(CITY_POINTS[city][2] for city in (*CITY_INDEX.found(text), *CITY_ALIAS_INDEX.found(text)))
+    if len(found) != 1:
+        return None
+    country = found.pop()
+    if country not in COUNTRY_POINTS:
+        return None
+    lat, lon = COUNTRY_POINTS[country]
+    return _Place(country, lat, lon, "topic")
 
 
 def _date_clues(text: str) -> dict[str, frozenset[str]]:
@@ -216,6 +275,8 @@ def _clues(article: NewsArticle) -> _Clues:
     tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", headline)
     lowered = {_text(token) for token in tokens}
     kinds = [kind for kind, words in INCIDENT_WORDS.items() if lowered & words]
+    if not kinds and article.editor_section in EDITOR_SECTION_KINDS:
+        kinds = [EDITOR_SECTION_KINDS[article.editor_section]]
     reported = bool(kinds) and not NOT_AN_INCIDENT.search(text) and not HISTORICAL_OR_SPECULATIVE.search(text)
     words = frozenset(word for word in lowered if len(word) >= 4 and word not in STOP_WORDS)
     dates = _date_clues(text)
@@ -226,6 +287,10 @@ def _clues(article: NewsArticle) -> _Clues:
                                for observation in article.observations)
     # A place is only attached to a headline that reports an incident now, not to any story naming a place.
     place = _resolve_place(text, places, countries) if reported else None
+    if reported:
+        place = _linked_place(article.linked_places, place) or place
+    if reported and place is None and not places and not countries:
+        place = _topic_place(article.editor_topics)
     eligible = (place is not None and time is not None and not conflicting_provider_times and not unsupported_language
                 and all(len(values) <= 1 for values in dates.values()))
     return _Clues(article, places, countries, kinds[0] if reported else None, words, dates, time, place, bool(eligible))
@@ -255,12 +320,24 @@ def _digest(value: object) -> str:
 
 
 def _location(place: _Place, source_url: str | None) -> NewsLocation:
+    if place.level == "linked":
+        return NewsLocation(
+            lat=place.lat, lon=place.lon, label=f"{place.label} (linked Wikipedia place)",
+            precision="approximate_area", confidence="low", source_url=place.source_url,
+            basis=("The curated entry links to the Wikipedia article for this place; the marker is that article's own reference "
+                   "coordinate. It is finer than a city or country centre but still not a verified incident site."))
     if place.level == "city":
         return NewsLocation(
             lat=place.lat, lon=place.lon, label=f"{place.label} (place named in headline)",
             precision="approximate_area", confidence="low", source_url=source_url,
             basis=("The headline names this city alongside an incident word. The marker is the city's reference point, "
                    "not a verified incident site; the report may concern a nearby area or only mention the city."))
+    if place.level == "topic":
+        return NewsLocation(
+            lat=place.lat, lon=place.lon, label=f"{place.label} (country named in topic heading)",
+            precision="approximate_area", confidence="low", source_url=source_url,
+            basis=("The entry names no place itself; the curated listing files it under a topic heading that names this country. "
+                   "The marker is the country's rough geographic centre, not an incident site; the entry may concern another place."))
     return NewsLocation(
         lat=place.lat, lon=place.lon, label=f"{place.label} (country named in headline)",
         precision="approximate_area", confidence="low", source_url=source_url,
