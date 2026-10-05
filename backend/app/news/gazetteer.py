@@ -4,10 +4,18 @@ A point here is where a named city or country is, never where an incident
 happened. City points are city centres; country points are rough geographic
 centres, not capitals. Consumers must label any position derived from this
 table as an approximate headline place mention with low confidence.
+
+The hand-curated tables below take precedence. Natural Earth populated places and
+country centroids (see gazetteer_natural_earth.py) fill in the rest, minus any name
+that would double-match a curated place or its alternative spelling.
 """
 
+from math import asin, cos, radians, sin, sqrt
+
+from app.news import gazetteer_natural_earth as natural_earth
+
 # City -> (latitude, longitude, country). Tripoli is ambiguous without its country.
-CITY_POINTS: dict[str, tuple[float, float, str]] = {
+CURATED_CITY_POINTS: dict[str, tuple[float, float, str]] = {
     "Abu Dhabi": (24.45, 54.38, "United Arab Emirates"), "Abuja": (9.06, 7.49, "Nigeria"),
     "Accra": (5.56, -0.20, "Ghana"), "Addis Ababa": (9.01, 38.76, "Ethiopia"), "Aden": (12.79, 45.02, "Yemen"),
     "Aleppo": (36.20, 37.16, "Syria"), "Amman": (31.95, 35.93, "Jordan"), "Ankara": (39.93, 32.86, "Turkey"),
@@ -64,7 +72,7 @@ CITY_POINTS: dict[str, tuple[float, float, str]] = {
     "Zurich": (47.38, 8.54, "Switzerland"),
 }
 
-CITY_ALIASES = {
+CURATED_CITY_ALIASES = {
     "kiev": "Kyiv", "odessa": "Odesa", "bogotá": "Bogota", "são paulo": "Sao Paulo", "sana'a": "Sanaa",
     "saint petersburg": "St Petersburg", "st. petersburg": "St Petersburg", "khan yunis": "Khan Younis",
     "hodeida": "Hodeidah", "kharkov": "Kharkiv", "zaporizhia": "Zaporizhzhia", "gaza city": "Gaza",
@@ -72,7 +80,7 @@ CITY_ALIASES = {
 }
 
 # Country -> rough geographic centre. Deliberately not the capital.
-COUNTRY_POINTS: dict[str, tuple[float, float]] = {
+CURATED_COUNTRY_POINTS: dict[str, tuple[float, float]] = {
     "Afghanistan": (33.9, 67.7), "Algeria": (28.0, 2.6), "Argentina": (-35.4, -65.2), "Armenia": (40.3, 44.9),
     "Australia": (-25.3, 133.8), "Azerbaijan": (40.3, 47.7), "Bahrain": (26.0, 50.55), "Bangladesh": (23.7, 90.3),
     "Belarus": (53.5, 28.0), "Belgium": (50.6, 4.6), "Brazil": (-10.8, -52.9), "Burkina Faso": (12.3, -1.7),
@@ -97,3 +105,27 @@ COUNTRY_POINTS: dict[str, tuple[float, float]] = {
     "United Kingdom": (54.1, -2.9), "United States": (39.8, -98.6), "Venezuela": (7.1, -66.2),
     "Vietnam": (16.6, 106.3), "Yemen": (15.9, 47.6), "Zimbabwe": (-19.0, 29.9),
 }
+
+
+def _distance_km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    lat1, lon1, lat2, lon2 = map(radians, (*a, *b))
+    return 12742 * asin(sqrt(sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2))
+
+
+def _merge_cities() -> tuple[dict[str, tuple[float, float, str]], dict[str, str]]:
+    taken = {name.split(",")[0].casefold() for name in CURATED_CITY_POINTS} | set(CURATED_CITY_ALIASES)
+    cities = dict(CURATED_CITY_POINTS)
+    aliases = dict(CURATED_CITY_ALIASES)
+    for name, (lat, lon, country) in natural_earth.CITY_POINTS.items():
+        # A spelling variant of a curated city ("Kiev", "Rangoon") sits on top of it; keep the curated entry.
+        if name.casefold() in taken or any(_distance_km((lat, lon), point[:2]) < 25 for point in CURATED_CITY_POINTS.values()):
+            continue
+        cities[name] = (lat, lon, country)
+    for alias, name in natural_earth.CITY_ALIASES.items():
+        if name in cities and alias not in taken and alias not in aliases:
+            aliases[alias] = name
+    return cities, aliases
+
+
+CITY_POINTS, CITY_ALIASES = _merge_cities()
+COUNTRY_POINTS: dict[str, tuple[float, float]] = {**natural_earth.COUNTRY_POINTS, **CURATED_COUNTRY_POINTS}

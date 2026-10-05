@@ -10,7 +10,7 @@ Built with **Next.js, TypeScript, FastAPI, SQLAlchemy, and Alembic**. The interf
 
 [Desktop demo](docs/images/release-demo-desktop.jpg) | [Mobile demo](docs/images/release-demo-mobile.jpg) | [Fetched articles](docs/images/release-fetched-desktop.jpg) | [Source status](docs/images/release-source-status.jpg) | [Evidence dossier](docs/images/evidence-brief.jpg)
 
-> **Early-stage prototype.** Metadata ingestion and the interactive demo work. Incident headlines that name one clear city or country are now placed on the map at that place, labeled as an approximate, low-confidence headline mention rather than a verified site. Placement is keyword matching over a small gazetteer, so recall is limited and wrong markers are possible. The pictured numbered hotspots are fictional scenarios, not live incidents.
+> **Early-stage prototype.** Metadata ingestion and the interactive demo work. Incident headlines that name one clear city or country are now placed on the map at that place, labeled as an approximate, low-confidence headline mention rather than a verified site. Placement is keyword matching over a gazetteer of about 1,100 cities and 200 countries, so recall is limited and wrong markers are possible. The pictured numbered hotspots are fictional scenarios, not live incidents.
 
 ## Current capabilities
 
