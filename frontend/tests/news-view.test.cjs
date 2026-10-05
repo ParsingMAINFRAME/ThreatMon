@@ -9,7 +9,7 @@ const loadedModule = { exports: {} };
 const source = readFileSync(path.join(__dirname, '../src/lib/news-view.ts'), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 vm.runInNewContext(compiled, { exports: loadedModule.exports, module: loadedModule, URL, URLSearchParams, Intl });
-const { deduplicateNewsArticles, buildNewsEvents, clusterNewsEvents, parseNewsState, newsHref, selectNewsEvents, newsCoverage, formatNewsTime, newsPublisherId, newsSources, coverageIntensity, COVERAGE_INTENSITY_BANDS } = loadedModule.exports;
+const { deduplicateNewsArticles, buildNewsEvents, clusterNewsEvents, parseNewsState, newsHref, selectNewsEvents, newsCoverage, formatNewsTime, newsPublisherId, newsSources, coverageIntensity, COVERAGE_INTENSITY_BANDS, newsEventTypeGroup, NEWS_EVENT_TYPE_GROUPS } = loadedModule.exports;
 const plain = value => JSON.parse(JSON.stringify(value));
 const AS_OF = '2026-09-30T12:00:00Z';
 const article = (id, overrides = {}) => ({ id, canonical_url: null, headline: `Synthetic story ${id}`, publisher: 'Demo Publisher', published_at: '2026-09-30T11:30:00Z', retrieved_at: AS_OF, summary: 'Synthetic scenario.', is_demo: true, syndication_key: null, duplicate_urls: [], ...overrides });
@@ -275,4 +275,15 @@ test('bulletin channel URLs retain filters and edition on the secondary route', 
   assert.ok(href.startsWith('/signals?view=bulletins&edition=snapshot'));
   assert.deepEqual(plain(parseNewsState(new URLSearchParams(href.split('?')[1]))), plain(state));
   assert.ok(newsHref(state, 'snapshot', 'news').startsWith('/?edition=snapshot'));
+});
+
+test('map color groups follow the reported event type and default to other news', () => {
+  for (const [category, expected] of [
+    ['attack', 'conflict'], ['explosion', 'conflict'], ['shooting', 'conflict'],
+    ['unrest', 'unrest'], ['protest', 'unrest'],
+    ['earthquake', 'disaster'], ['flood', 'disaster'], ['fire', 'disaster'], ['tropical_cyclone', 'disaster'], ['natural_hazard', 'disaster'],
+    ['collision', 'accident'], ['outage', 'accident'],
+    ['world_news', 'other'], ['News report', 'other'], ['cybersecurity', 'other'], ['', 'other'], [' Attack ', 'conflict'],
+  ]) assert.equal(newsEventTypeGroup(category), expected, category);
+  assert.deepEqual(plain(NEWS_EVENT_TYPE_GROUPS.map(entry => entry.group)), ['conflict', 'unrest', 'disaster', 'accident', 'other']);
 });

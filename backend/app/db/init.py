@@ -26,7 +26,10 @@ def init_db(*, seed_demo: bool = True, bind: Engine | None = None) -> None:
             has_map_location = any(column["name"] == "map_location" for column in inspector.get_columns("threat_events"))
             revision = "0001_initial_threat_tables"
             if has_provenance and "ingestion_runs" in tables:
+                has_run_sequence = any(column["name"] == "sequence" for column in inspector.get_columns("ingestion_runs"))
                 revision = "0003_map_locations" if has_map_location else "0002_ingestion_provenance"
+                if has_map_location and has_run_sequence:
+                    revision = "0004_ingestion_run_sequence"
             command.stamp(config, revision)
         command.upgrade(config, "head")
     if seed_demo:

@@ -118,6 +118,20 @@ def test_bulk_import_places_headlines_tracks_progress_and_never_calls_the_search
     assert calls == [1] and later.fetch_state == "ok" and len(later.events) == 1
 
 
+def test_a_missing_window_file_is_skipped_and_marks_coverage_incomplete(tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "news_gdelt_mode", "bulk")
+
+    def handler(request):
+        if request.url.path.endswith("lastupdate.txt"):
+            return httpx.Response(200, content=LASTUPDATE)
+        return httpx.Response(200, content=archive(*ROWS)) if "214500" in request.url.path else httpx.Response(404)
+    result = run(tmp_path / "news.json", handler)
+    status = result.sources[0]
+    assert result.fetch_state == "ok" and status.item_count == 1 and status.possibly_truncated
+    missing = run(tmp_path / "other.json", lambda request: httpx.Response(404))
+    assert missing.fetch_state == "error" and "HTTP 404" in missing.sources[0].error
+
+
 def test_bulk_failure_preserves_stored_articles_and_backs_off(tmp_path, monkeypatch):
     monkeypatch.setattr(get_settings(), "news_gdelt_mode", "bulk")
 

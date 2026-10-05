@@ -4,7 +4,7 @@ The MIT license covers original ThreatMon code, documentation and graphic compos
 
 ## Bundled geography
 
-The application bundles transformed Natural Earth 1:110m land geometry. Natural Earth data is public domain. The exact upstream commit, source hash and transformation are recorded in [docs/map.md](docs/map.md). Natural Earth provides geographic context, not evidence for news claims.
+The application bundles transformed Natural Earth 1:110m land geometry and a place-name table derived from Natural Earth 1:50m populated places and countries. Natural Earth data is public domain. The exact upstream commit, source hash and transformation are recorded in [docs/map.md](docs/map.md). Natural Earth provides geographic context, not evidence for news claims.
 
 ## External metadata
 

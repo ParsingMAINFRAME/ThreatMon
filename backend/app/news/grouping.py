@@ -22,7 +22,7 @@ from app.news.gazetteer import CITY_ALIASES, CITY_POINTS, COUNTRY_POINTS
 from app.news.models import NewsArticle, NewsEvent, NewsLocation
 
 
-GROUPING_VERSION = "headline-place-v2"
+GROUPING_VERSION = "headline-place-v3"
 MAX_GROUP_ARTICLES = 250
 MAX_INPUT_ARTICLES = 1000
 MAX_TIME_SPAN = timedelta(hours=24)
@@ -101,9 +101,36 @@ def _mentions(text: str, phrase: str) -> bool:
     return re.search(r"(?<!\w)" + re.escape(_text(phrase)) + r"(?!\w)", text) is not None
 
 
+class _MentionIndex:
+    """Finds which names a text mentions, checking only names whose first word occurs in it.
+
+    Same result as testing every name with _mentions, which is too slow for a gazetteer of a thousand places.
+    """
+
+    def __init__(self, names: dict[str, str]):  # spelling -> value reported when it is mentioned
+        self.by_first_word: dict[str, list[tuple[str, str]]] = {}
+        self.always: list[tuple[str, str]] = []
+        for spelling, value in names.items():
+            first = re.match(r"\w+", _text(spelling))
+            if first:
+                self.by_first_word.setdefault(first[0], []).append((spelling, value))
+            else:
+                self.always.append((spelling, value))
+
+    def found(self, text: str) -> list[str]:
+        words = set(re.findall(r"\w+", text))
+        candidates = [*self.always, *(entry for word in words for entry in self.by_first_word.get(word, ()))]
+        return [value for spelling, value in candidates if _mentions(text, spelling)]
+
+
+CITY_INDEX = _MentionIndex({city: city for city in CITY_MENTIONS})
+CITY_ALIAS_INDEX = _MentionIndex(CITY_ALIASES)
+COUNTRY_INDEX = _MentionIndex({country: country for country in COUNTRY_CLUES})
+
+
 def _places(text: str) -> tuple[str, ...]:
-    places = {city for city in CITY_MENTIONS if _mentions(text, city)}
-    places.update(city for alias, city in CITY_ALIASES.items() if _mentions(text, alias))
+    places = set(CITY_INDEX.found(text))
+    places.update(CITY_ALIAS_INDEX.found(text))
     if _mentions(text, "Tripoli"):
         countries = [country for country in ("Libya", "Lebanon") if _mentions(text, country)]
         places.add(f"Tripoli, {countries[0]}" if len(countries) == 1 else "Tripoli (ambiguous mention)")
@@ -185,7 +212,7 @@ def _clues(article: NewsArticle) -> _Clues:
     text = NOT_A_PLACE.sub(" ", _text(headline)).strip()
     # An outlet named after the same town ("Athens News Courier") signals a local story, not the well-known city.
     places = tuple(place for place in _places(text) if not _mentions(_text(outlet), place.split(",")[0]))
-    countries = frozenset(country for country in COUNTRY_CLUES if _mentions(text, country))
+    countries = frozenset(COUNTRY_INDEX.found(text))
     tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", headline)
     lowered = {_text(token) for token in tokens}
     kinds = [kind for kind, words in INCIDENT_WORDS.items() if lowered & words]

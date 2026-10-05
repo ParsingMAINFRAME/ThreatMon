@@ -21,7 +21,7 @@
 ## Next useful milestones
 
 1. Evaluate the saved 250-article discovery sample for relevance, duplicate/syndicated reporting and grouping recall. Establish reviewed examples before loosening candidate rules or adding feeds.
-2. Improve incident placement beyond approximate headline place mentions: a larger gazetteer, sub-city evidence and analyst review. Never substitute a capital or GEO mention point for a country-level mention.
+2. Improve incident placement beyond approximate headline place mentions: sub-city evidence and analyst review (the gazetteer now covers about 1,100 Natural Earth cities). Never substitute a capital or GEO mention point for a country-level mention.
 3. Extend the one-hour refresh check to multi-day runs and choose a hosted deployment model. The poller and an optional Docker `poller` service exist; nothing starts them automatically.
 4. Add watchlists and source-backed exposure inputs.
 5. Add analyst notes and review states, followed by authentication and access controls.

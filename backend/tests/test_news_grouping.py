@@ -263,3 +263,36 @@ def test_prior_algorithm_version_cannot_reuse_an_old_assignment_identity():
 def test_input_bound_rejects_unbounded_computation_before_processing_articles():
     with pytest.raises(ValueError, match="1000 article bound"):
         group_candidate_events([article("a")] * 1001)
+
+
+@pytest.mark.parametrize("headline,label", [
+    ("Explosion at chemical plant in Tianjin", "Tianjin, China (place named in headline)"),
+    ("Earthquake shakes Izmir", "İzmir, Turkey (place named in headline)"),
+    ("Flooding in Porto Alegre forces evacuations", "Porto Alegre, Brazil (place named in headline)"),
+    ("Coup attempt in Bolivia", "Bolivia (country named in headline)"),
+    ("Missile strike on Kiev overnight", "Kyiv, Ukraine (place named in headline)"),  # curated spelling wins, no double match
+])
+def test_natural_earth_places_extend_the_curated_gazetteer(headline, label):
+    event = group_candidate_events([article("a", headline)])[0]
+    assert event.location.label == label and event.location.confidence == "low"
+
+
+@pytest.mark.parametrize("headline", [
+    "Mary attacks rival over budget",  # Mary, Turkmenistan is also a personal name
+    "Protests in Georgia over election",  # Georgia is also a US state
+    "Shooting in Washington leaves two hurt",  # Washington is a state, a city and a government metonym
+])
+def test_place_names_that_are_common_words_or_ambiguous_stay_unlocated(headline):
+    event = group_candidate_events([article("a", headline)])[0]
+    assert event.location is None
+
+
+def test_generated_gazetteer_is_pinned_to_its_natural_earth_source():
+    from app.news import gazetteer, gazetteer_natural_earth
+
+    assert gazetteer_natural_earth.SOURCE["commit"] in gazetteer_natural_earth.SOURCE["places"]
+    assert len(gazetteer.CITY_POINTS) > 1000 and len(gazetteer.COUNTRY_POINTS) > 190
+    assert all(-90 <= lat <= 90 and -180 <= lon <= 180 for lat, lon, _ in gazetteer.CITY_POINTS.values())
+    # Curated points are never replaced by generated ones.
+    assert gazetteer.CITY_POINTS["Kyiv"] == gazetteer.CURATED_CITY_POINTS["Kyiv"]
+    assert gazetteer.COUNTRY_POINTS["Saudi Arabia"] == gazetteer.CURATED_COUNTRY_POINTS["Saudi Arabia"]

@@ -80,6 +80,10 @@ class NewsError(ValueError):
         self.retry_after = retry_after
 
 
+class NewsFileMissing(NewsError):
+    pass
+
+
 class NewsCache(NewsModel):
     response: NewsResponse
     etag: str | None = Field(default=None, max_length=1024)
@@ -498,6 +502,8 @@ async def ingest_gdelt(path: Path | str, *, client: httpx.AsyncClient | None = N
 async def _download(client: httpx.AsyncClient, url: str, limit: int, now: datetime) -> bytes:
     async with client.stream("GET", url, headers={"User-Agent": "ThreatMon/0.4 (https://github.com/ParsingMAINFRAME/ThreatMon; bounded metadata client)"},
                              timeout=30, follow_redirects=False) as response:
+        if response.status_code == 404:
+            raise NewsFileMissing("GDELT file server returned HTTP 404; no immediate retry")
         if response.status_code != 200:
             raise NewsError(f"GDELT file server returned HTTP {response.status_code}; no immediate retry", _retry_after(response.headers.get("retry-after"), now))
         body = bytearray()
@@ -538,7 +544,12 @@ async def ingest_gdelt_bulk(path: Path | str, *, client: httpx.AsyncClient | Non
             times, skipped = file_times(latest, watermark)
             new_articles = []
             for time in times:
-                new_articles.extend(parse_gkg_file(await _download(client, file_url(time), MAX_ZIP_BYTES, now), file_time=time, retrieved_at=now))
+                try:
+                    body = await _download(client, file_url(time), MAX_ZIP_BYTES, now)
+                except NewsFileMissing:
+                    skipped = True  # GDELT occasionally publishes no file for a window; the others are still read.
+                    continue
+                new_articles.extend(parse_gkg_file(body, file_time=time, retrieved_at=now))
         if times:
             start, end = times[0] - timedelta(minutes=15), times[-1]
         else:

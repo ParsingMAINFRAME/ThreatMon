@@ -66,7 +66,7 @@ jobs:
               html = response.read().decode().lower()
               assert 'iran reported explosion exercise' not in html
               assert 'global voices' in html and 'gdelt' in html
-              assert 'coverage intensity' in html
+              assert 'event type' in html and 'neither is severity' in html
           with urlopen('http://localhost:8000/news?channel=signals') as response:
               bulletins = json.load(response)
           assert bulletins['channel'] == 'signals'
