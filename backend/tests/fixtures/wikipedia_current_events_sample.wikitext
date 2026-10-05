@@ -1,0 +1,35 @@
+<!-- SYNTHETIC SAMPLE: invented entries in the Current events portal's wikitext layout, for placement tests only. -->
+'''Armed conflicts and attacks'''
+*[[Russian invasion of Ukraine]]
+**[[Russian strikes against Ukrainian infrastructure]]
+***A drone hits an apartment block in [[Kharkiv]], injuring several residents. [https://sample-one.example/a1 (Sample One)]
+***Russian forces shell villages across the [[Kharkiv Oblast|Kharkiv region]]. [https://sample-two.example/a2 (Sample Two)]
+**Ukrainian drones strike an oil depot in [[Liski]], [[Voronezh Oblast]], [[Russia]]. [https://sample-three.example/a3 (Sample Three)]
+**Two soldiers are killed near the front line. [https://sample-four.example/a4 (Sample Four)]
+*[[Gaza war]]
+**An airstrike on a shelter in [[Jabalia]] kills several people. [https://sample-five.example/a5 (Sample Five)]
+**Aid convoy halted after gunfire near a crossing point. [https://sample-six.example/a6 (Sample Six)]
+*[[Myanmar civil war (2021–present)|Myanmar civil war]]
+**Resistance fighters seize an army outpost. [https://sample-seven.example/a7 (Sample Seven)]
+**The military bombs a village in [[Sagaing Region]]. [https://sample-eight.example/a8 (Sample Eight)]
+*[[Israel–Hezbollah conflict]]
+**Fighters kill four soldiers in an ambush. [https://sample-nine.example/a9 (Sample Nine)]
+*[[Insurgency in Balochistan]]
+**Militants kill nine passengers after stopping a bus on a highway in [[Pakistan]]. [https://sample-ten.example/a10 (Sample Ten)]
+*Gunmen kill twelve villagers in [[Zamfara State]], [[Nigeria]]. [https://sample-eleven.example/a11 (Sample Eleven)]
+*Missiles launched from [[Belgorod]] strike [[Kharkiv]] overnight. [https://sample-twelve.example/a12 (Sample Twelve)]
+
+'''Disasters and accidents'''
+*A passenger train derails near [[Balasore]], [[Odisha]], [[India]]. [https://sample-thirteen.example/a13 (Sample Thirteen)]
+*[[Typhoon Example]] makes landfall in the northern [[Philippines]]. [https://sample-fourteen.example/a14 (Sample Fourteen)]
+*A ferry capsizes on [[Lake Kivu]], leaving dozens missing. [https://sample-fifteen.example/a15 (Sample Fifteen)]
+*A landslide buries homes in [[Kathmandu]]. [https://sample-sixteen.example/a16 (Sample Sixteen)]
+
+'''Law and crime'''
+*A court sentences a former minister to prison. [https://sample-seventeen.example/a17 (Sample Seventeen)]
+*Police disperse protesters outside parliament in [[Nairobi]]. [https://sample-eighteen.example/a18 (Sample Eighteen)]
+
+'''Politics and elections'''
+*[[2026 Example general election]]
+**The ruling party wins a landslide victory. [https://sample-nineteen.example/a19 (Sample Nineteen)]
+*Talks collapse in [[Geneva]] without agreement. [https://sample-twenty.example/a20 (Sample Twenty)]
