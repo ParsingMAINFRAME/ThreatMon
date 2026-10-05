@@ -20,7 +20,7 @@ export type NewsEventTypeGroup = "conflict" | "unrest" | "disaster" | "accident"
 export const NEWS_EVENT_TYPE_GROUPS: readonly { group: NewsEventTypeGroup; label: string; categories: readonly string[] }[] = [
   { group: "conflict", label: "Attacks, strikes & shootings", categories: ["attack", "explosion", "shooting"] },
   { group: "unrest", label: "Unrest & protests", categories: ["unrest", "protest"] },
-  { group: "disaster", label: "Natural hazards & fires", categories: ["earthquake", "flood", "fire", "wildfire", "tropical_cyclone", "drought", "volcano", "natural_hazard"] },
+  { group: "disaster", label: "Natural hazards & fires", categories: ["earthquake", "flood", "fire", "wildfire", "storm", "landslide", "tropical_cyclone", "drought", "volcano", "natural_hazard"] },
   { group: "accident", label: "Accidents & outages", categories: ["collision", "outage"] },
   { group: "other", label: "Other news", categories: [] },
 ];

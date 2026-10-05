@@ -296,3 +296,27 @@ def test_generated_gazetteer_is_pinned_to_its_natural_earth_source():
     # Curated points are never replaced by generated ones.
     assert gazetteer.CITY_POINTS["Kyiv"] == gazetteer.CURATED_CITY_POINTS["Kyiv"]
     assert gazetteer.COUNTRY_POINTS["Saudi Arabia"] == gazetteer.CURATED_COUNTRY_POINTS["Saudi Arabia"]
+
+
+@pytest.mark.parametrize("headline,category", [
+    ("Typhoon makes landfall near Manila", "storm"),
+    ("Landslide buries homes in Kathmandu", "landslide"),
+    ("Volcano erupts near Jakarta, forcing evacuations", "volcano"),
+    ("Passenger train derails outside Lahore", "collision"),
+    ("Ferry capsized off Dhaka with dozens aboard", "collision"),
+    ("Building collapse in Lagos traps workers", "collision"),
+])
+def test_hazard_and_accident_words_name_the_event_type(headline, category):
+    event = group_candidate_events([article("a", headline)])[0]
+    assert event.category == category and event.scope == "located"
+
+
+@pytest.mark.parametrize("headline", [
+    "Ruling party wins landslide victory in Colombo",
+    "Ceasefire talks collapsed in Cairo",
+    "Stocks sank in Tokyo after the rate decision",
+    "Minister faces political storm in Paris",
+    "Avalanche of complaints reaches Berlin regulator",
+])
+def test_figurative_uses_of_hazard_words_stay_unlocated(headline):
+    assert group_candidate_events([article("a", headline)])[0].scope == "unlocated"

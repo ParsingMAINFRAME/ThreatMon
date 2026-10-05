@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -46,6 +46,27 @@ class NewsObservation(NewsModel):
         return canonical_url(value)
 
 
+# Wikipedia coordinate types that name a place an incident can be reported at. Countries, rivers, mountains,
+# water bodies and the like are excluded: their single coordinate says little about where something happened.
+LINKED_PLACE_TYPES = ("event", "city", "landmark", "airport", "railwaystation", "edu", "isle",
+                      "adm3rd", "adm2nd", "adm1st", "state")
+
+
+class LinkedPlace(NewsModel):
+    """A place article an editor linked from an entry, with that article's own primary coordinate."""
+    title: str = Field(min_length=1, max_length=300)
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    place_type: Literal[LINKED_PLACE_TYPES]  # type: ignore[valid-type]
+    url: str
+
+    @field_validator("url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        from app.news.urls import canonical_url
+        return canonical_url(value)
+
+
 class NewsArticle(NewsModel):
     id: str = Field(min_length=1, max_length=160)
     canonical_url: str | None
@@ -66,6 +87,12 @@ class NewsArticle(NewsModel):
     license_url: str | None = None
     source_window_start: AwareDatetime | None = None
     source_window_end: AwareDatetime | None = None
+    # Editor-supplied context from a curated listing (Wikipedia Current events): the portal section,
+    # the topic headings the entry sits under, and the article titles the entry links to.
+    editor_section: str | None = Field(default=None, max_length=100)
+    editor_topics: list[Annotated[str, Field(min_length=1, max_length=300)]] = Field(default_factory=list, max_length=4)
+    linked_titles: list[Annotated[str, Field(min_length=1, max_length=300)]] = Field(default_factory=list, max_length=32)
+    linked_places: list[LinkedPlace] = Field(default_factory=list, max_length=32)
 
     @field_validator("published_at", "first_seen_at", "retrieved_at", "source_window_start", "source_window_end")
     @classmethod
@@ -96,6 +123,46 @@ class NewsArticle(NewsModel):
         return self
 
 
+class PlacementReview(NewsModel):
+    """An analyst's decision about the map position of the event containing one article.
+
+    Recorded through the operator CLI, never the HTTP API. Keyed by article URL because
+    event identities change as grouping is recomputed.
+    """
+    article_url: str
+    action: Literal["confirmed", "moved", "removed"]
+    note: str = Field(min_length=1, max_length=500)
+    reviewer: str = Field(min_length=1, max_length=100)
+    reviewed_at: AwareDatetime
+    # The automatic position the analyst saw; a confirmation lapses when that position changes.
+    reviewed_label: str | None = Field(default=None, max_length=300)
+    lat: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    lon: float | None = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
+    place_label: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator("article_url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        from app.news.urls import canonical_url
+        return canonical_url(value)
+
+    @field_validator("reviewed_at")
+    @classmethod
+    def utc_timestamp(cls, value: datetime) -> datetime:
+        return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def complete_action(self) -> "PlacementReview":
+        position = (self.lat, self.lon, self.place_label)
+        if self.action == "moved" and None in position:
+            raise ValueError("A moved position needs a latitude, longitude and place label")
+        if self.action != "moved" and any(value is not None for value in position):
+            raise ValueError("Only a moved position carries coordinates")
+        if self.action == "confirmed" and self.reviewed_label is None:
+            raise ValueError("A confirmation records the position it confirms")
+        return self
+
+
 class NewsEvent(NewsModel):
     id: str = Field(min_length=1, max_length=160)
     title: str = Field(min_length=1, max_length=500)
@@ -115,6 +182,7 @@ class NewsEvent(NewsModel):
     grouping_version: str | None = Field(default=None, max_length=100)
     place_hints: list[str] = Field(default_factory=list, max_length=8)
     assignment_revision: str | None = Field(default=None, max_length=160)
+    placement_review: PlacementReview | None = None
 
     @model_validator(mode="after")
     def consistent_evidence(self) -> "NewsEvent":
