@@ -106,7 +106,7 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
           {event.grouping_status ? <div><dt>Association status</dt><dd>{isCandidate ? "Candidate association — unverified" : event.grouping_status === "source_event" ? "Source-identified event" : "Single-source record"}</dd></div> : null}
           {event.grouping_version ? <div><dt>Grouping method version</dt><dd>{event.grouping_version}</dd></div> : null}
           {event.assignment_revision ? <div><dt>Assignment revision</dt><dd>{event.assignment_revision}</dd></div> : null}
-          {event.place_hints?.length ? <div><dt>Unverified place mentions</dt><dd>{event.place_hints.join("; ")}. Textual hints only; no incident location is established from these mentions.</dd></div> : null}
+          {event.place_hints?.length ? <div><dt>Places named in headlines</dt><dd>{event.place_hints.join("; ")}. Headline mentions only; a map marker shows the named place, not a verified incident site.</dd></div> : null}
         </dl>
         <p className="news-coverage-note">Status describes available reporting, not independent verification. Syndicated stories may share an original report. Retrieval records collection time, not event time.</p>
       </details>

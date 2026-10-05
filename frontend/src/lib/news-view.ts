@@ -142,10 +142,11 @@ export function clusterNewsEvents(events: NewsEventView[], zoom: number, viewpor
     while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index]; }
     return index;
   };
-  if (zoom < 3) {
+  {
     // Preserve room for 44–56px controls on a small viewport without merging incident identities.
+    // At maximum zoom only events at the same reference point stay together, so stacked markers remain reachable.
     const width = Number.isFinite(viewportWidth) && viewportWidth > 0 ? viewportWidth : 1000;
-    const distance = Math.max(42, 64 / width * 1000) / Math.max(1, zoom);
+    const distance = zoom < 3 ? Math.max(42, 64 / width * 1000) / Math.max(1, zoom) : 0.5;
     for (let a = 0; a < located.length; a++) {
       const first = located[a].location!;
       for (let b = a + 1; b < located.length; b++) {

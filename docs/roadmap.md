@@ -21,7 +21,7 @@
 ## Next useful milestones
 
 1. Evaluate the saved 250-article discovery sample for relevance, duplicate/syndicated reporting and grouping recall. Establish reviewed examples before loosening candidate rules or adding feeds.
-2. Add defensible incident-location evidence and analyst review. DOC headline references remain unlocated; never substitute a capital or GEO mention point for missing evidence.
+2. Improve incident placement beyond approximate headline place mentions: a larger gazetteer, sub-city evidence and analyst review. Never substitute a capital or GEO mention point for a country-level mention.
 3. Verify refresh reliability over repeated authorized fetches, then choose a deployment model. The foreground poller exists, but no automatic service is active.
 4. Add watchlists and source-backed exposure inputs.
 5. Add analyst notes and review states, followed by authentication and access controls.

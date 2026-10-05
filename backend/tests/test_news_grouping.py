@@ -24,7 +24,7 @@ def article(identity, headline=FIRST, *, publisher=None, hours=0, published=True
     )
 
 
-def test_compatible_cross_publisher_headlines_form_unlocated_candidate():
+def test_compatible_cross_publisher_headlines_form_candidate_at_named_place():
     records = [article("a"), article("b", SECOND)]
     before = [item.model_dump() for item in records]
     events = group_candidate_events(records)
@@ -34,17 +34,71 @@ def test_compatible_cross_publisher_headlines_form_unlocated_candidate():
     assert event.grouping_version == GROUPING_VERSION
     assert event.assignment_revision
     assert event.place_hints == ["Tehran"]
-    assert event.location is None and event.scope == "unlocated"
+    assert event.scope == "located" and event.location.label == "Tehran, Iran (place named in headline)"
+    assert event.location.precision == "approximate_area" and event.location.confidence == "low"
+    assert "not a verified incident site" in event.location.basis
     assert event.severity == "unknown" and event.status == "unconfirmed"
     assert {item.id for item in event.articles} == {"a", "b"}
     assert "independent confirmation" in event.grouping_basis.lower()
     assert [item.model_dump() for item in records] == before
 
 
+def test_same_city_and_incident_type_join_without_shared_names():
+    events = group_candidate_events([article("a", "Ukraine bombs Moscow in overnight raid"), article("b", "Drone attack on Moscow, mayor says")])
+    assert len(events) == 1 and events[0].category == "attack" and len(events[0].articles) == 2
+    assert events[0].location.label == "Moscow, Russia (place named in headline)"
+    assert (events[0].location.lat, events[0].location.lon) == (55.76, 37.62)
+
+
+@pytest.mark.parametrize("headline,label,point", [
+    ("Bomb blast kills three in Saudi Arabia", "Saudi Arabia (country named in headline)", (24.0, 44.5)),
+    ("Russia strikes Ukraine with missiles", "Ukraine (country named in headline)", (49.0, 31.4)),
+    ("Kyiv says Russian missiles hit Kharkiv", "Kharkiv, Ukraine (place named in headline)", (49.99, 36.23)),
+    ("Explosion reported in Tripoli, Libya", "Tripoli, Libya (place named in headline)", (32.89, 13.19)),
+    ("Blast heard in Kiev", "Kyiv, Ukraine (place named in headline)", (50.45, 30.52)),
+    ("Gunmen open fire on villagers in Marte, Borno State, Nigeria", "Nigeria (country named in headline)", (9.6, 8.1)),
+])
+def test_single_headline_is_placed_at_the_named_place_with_low_confidence(headline, label, point):
+    event = group_candidate_events([article("a", headline)])[0]
+    assert event.grouping_status == "single_source" and event.scope == "located"
+    assert event.location.label == label and (event.location.lat, event.location.lon) == point
+    assert event.location.precision == "approximate_area" and event.location.confidence == "low"
+    assert event.location.source_url == event.articles[0].canonical_url
+    assert event.severity == "unknown"
+
+
+def test_country_marker_is_a_rough_centre_and_never_the_capital():
+    event = group_candidate_events([article("a", "Bomb blast kills three in Saudi Arabia")])[0]
+    assert (event.location.lat, event.location.lon) != (24.71, 46.68)  # Riyadh
+    assert "not its capital" in event.location.basis
+
+
+@pytest.mark.parametrize("headline", [
+    "Orion chemical plant quarterly results beat forecasts in Tehran",  # no incident word
+    "Explosion at Orion chemical plant",  # no place
+    "Explosion at Orion chemical plant in Unknownville",  # place outside the vocabulary
+    "Explosion at Orion chemical plant in Tripoli",  # ambiguous city
+    "Paris, Texas blast damages Orion chemical facility",  # explicit other Paris
+    "Tehran and Beirut report Orion chemical plant explosion",  # two cities, neither targeted
+    "Iran and Israel trade attacks",  # two countries, neither targeted
+    "Anniversary of Orion chemical plant explosion in Tehran",  # historical
+    "Experts warn of risk of attack in London",  # speculative
+    "Georgia homecoming party shooting: 2 dead in Vienna",  # a US state signals a same-name town
+    "Rail strike halts trains in Paris",  # labour dispute
+    "Minister under fire in London over budget",  # figure of speech
+    "Heart attack deaths rise in India",  # medical
+    "Flooding forces evacuations across New Mexico",  # a place whose name contains another place
+    "New York Times reporter describes shooting",  # publication name, not a place
+    "Pilot on flight to Israel stabbed colleague and tried to crash plane",  # destination, not a targeted place
+    "Morocco strike late to win Africa title",  # sport
+    "Blast kills two | Kabul Daily",  # trailing publisher name
+])
+def test_headlines_without_one_clear_place_and_incident_stay_unlocated(headline):
+    event = group_candidate_events([article("a", headline)])[0]
+    assert event.location is None and event.scope == "unlocated"
+
+
 @pytest.mark.parametrize("first,second", [
-    ("Explosion at Orion chemical plant in Iran", "Iran blast damages Orion chemical facility"),
-    ("Explosion at Orion chemical plant", "Blast damages Orion chemical facility"),
-    (FIRST, "Tehran blast damages Atlas storage depot"),
     (FIRST, "Fire at Orion chemical plant in Tehran"),
     (FIRST, "Explosion at Orion chemical plant in Beirut"),
     (FIRST, "Tehran and Beirut report Orion chemical plant explosion"),
@@ -52,13 +106,18 @@ def test_compatible_cross_publisher_headlines_form_unlocated_candidate():
     ("Explosion at Orion chemical plant in Unknownville", "Unknownville blast damages Orion chemical plant"),
     ("Explosion at Orion chemical plant in Tripoli", "Tripoli blast damages Orion chemical facility"),
     ("Explosion at Orion chemical plant in Paris, France", "Paris, Texas blast damages Orion chemical facility"),
+    ("Explosion at Orion chemical plant in Iran", "Blast in Iran injures market traders"),
 ])
-def test_weak_ambiguous_or_conflicting_location_type_and_entity_clues_do_not_join(first, second):
+def test_different_ambiguous_or_conflicting_place_and_type_clues_do_not_join(first, second):
     events = group_candidate_events([article("a", first), article("b", second)])
     assert len(events) == 2
     assert all(event.grouping_status == "single_source" for event in events)
-    assert all(event.location is None for event in events)
 
+
+def test_country_level_reports_join_only_with_shared_headline_content():
+    events = group_candidate_events([
+        article("a", "Explosion at Orion chemical plant in Iran"), article("b", "Iran blast damages Orion chemical facility")])
+    assert len(events) == 1 and events[0].location.label == "Iran (country named in headline)"
 
 @pytest.mark.parametrize("first_date,second_date", [
     ("on 2026-09-29", "on 2026-09-30"),
@@ -177,7 +236,7 @@ def test_provider_clock_is_only_a_window_heuristic_and_source_country_is_not_inc
     second = article("b", SECOND, published=False).model_copy(update={"observations": [observation(country="Germany")]})
     event = group_candidate_events([first, second])[0]
     assert len(event.articles) == 2 and event.place_hints == ["Tehran"]
-    assert event.location is None
+    assert event.location.label.startswith("Tehran, Iran")  # never France or Germany, the outlets' countries
     assert "provider and collection times are only heuristics" in event.grouping_basis.lower()
     later = second.model_copy(update={"observations": [observation(hours=25)]})
     assert len(group_candidate_events([first, later])) == 2
@@ -190,13 +249,9 @@ def test_conflicting_provider_clocks_or_non_english_metadata_prevent_heuristic_a
     assert len(group_candidate_events([foreign, article("b", SECOND)])) == 2
 
 
-def test_country_adjectives_or_generic_institutions_are_not_distinctive_entity_clues():
-    for headline in (
-        "Explosion damages Iranian chemical facility in Tehran",
-        "Explosion damages Government chemical facility in Tehran",
-    ):
-        assert len(group_candidate_events([article("a", headline), article("b", headline)])) == 2
-
+def test_country_adjectives_alone_do_not_place_a_headline():
+    event = group_candidate_events([article("a", "Explosion damages Iranian chemical facility")])[0]
+    assert event.location is None and event.place_hints == []
 
 def test_prior_algorithm_version_cannot_reuse_an_old_assignment_identity():
     records = [article("a"), article("b", SECOND)]

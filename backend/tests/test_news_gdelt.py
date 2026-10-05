@@ -186,6 +186,12 @@ def test_gdelt_empty_articles_is_a_successful_empty_observation():
     assert events == [] and excluded == 0
 
 
+def test_gdelt_plain_text_message_is_reported_to_the_operator_not_parsed():
+    with pytest.raises(ValueError, match="message instead of article metadata: Your query was too short"):
+        parse_gdelt_response(b"Your query was too short or too long.\n", retrieved_at=NOW)
+    with pytest.raises(ValueError, match="empty response"):
+        parse_gdelt_response(b"", retrieved_at=NOW)
+
 def test_gdelt_accepts_up_to_250_input_records():
     items = [record(url=f"https://publisher.example/story/{index}") for index in range(250)]
     events, excluded = parse_gdelt_response(response(*items), retrieved_at=NOW)

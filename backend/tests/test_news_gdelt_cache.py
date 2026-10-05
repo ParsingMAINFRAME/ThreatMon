@@ -128,7 +128,7 @@ def test_news_channel_excludes_signals_and_known_official_bulletin_discovery(tmp
     ingest(path, lambda request: httpx.Response(200, json=data))
     news = read_sources(path, now=NOW)
     assert news.channel == "news" and len(news.events) == 1
-    assert {source.source_id for source in news.sources} == {"globalvoices", "gdelt"}
+    assert {source.source_id for source in news.sources} == {"globalvoices", "gdelt", "wikipedia"}
     signals = read_sources(path, now=NOW, channel="signals")
     assert signals.events == [] and {source.source_id for source in signals.sources} == {"gdacs", "nasa"}
 

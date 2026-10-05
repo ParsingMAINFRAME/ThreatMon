@@ -22,7 +22,7 @@ Severity describes supported event impact. It does not rise because an event has
 
 Marker color encodes collected article volume, never that severity value. Filtering the coverage can therefore change a marker's count and color while leaving its severity unchanged. Zero articles and official-only reports receive no news-intensity band.
 
-Locate events only from attached geographic evidence. Publisher headquarters, a country mentioned in a headline, and a story's source country do not establish an incident point. Preserve location precision and provenance; a regional label must not masquerade as an exact coordinate. Unlocated records remain accessible in the register. Synthetic demo points are explicitly illustrative.
+Locate events from attached geographic evidence, or from one clear place named in an incident headline under the [headline placement rules](news-pipeline.md#candidate-associations-and-geography). A headline placement is always labeled approximate and low confidence, and a country is shown at its rough centre, not its capital. Publisher headquarters and a story's source country never establish a position. Preserve location precision and provenance; a regional label must not masquerade as an exact coordinate. Unlocated records remain accessible in the register. Synthetic demo points are explicitly illustrative.
 
 Keep the following times distinct and display them in UTC:
 
@@ -68,7 +68,7 @@ The read-only endpoint accepts `edition=demo|snapshot` and `channel=news|signals
 
 The fixed endpoint is `https://globalvoices.org/feed/`. The app retains at most 20 articles and limits the response to 1 MiB. A check on **2026-09-30 at 22:31 UTC** returned HTTP 200, 252,117 bytes and 15 items, with publication dates and author fields. ETag and Last-Modified were present. These observations establish availability at that time only.
 
-Coverage is international community journalism and analysis, not a comprehensive wire service or a validated threat feed. Articles remain unlocated and severity stays unknown. No incident point is inferred from a headline, country category, author location or publisher address.
+Coverage is international community journalism and analysis, not a comprehensive wire service or a validated threat feed. Severity stays unknown. An article is placed only when its headline reports an incident at one clear named place; no position is inferred from a country category, author location or publisher address.
 
 ### Real hazard bulletins: GDACS
 

@@ -11,7 +11,7 @@ from app.news.service import MAX_FEED_BYTES, NewsError, _plain_text
 from app.news.urls import canonical_url
 
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
-GDELT_QUERY = "(explosion OR attack OR protest OR evacuation OR wildfire OR flood) sourcelang:english"
+GDELT_QUERY = "(airstrike OR \"missile strike\" OR \"drone attack\" OR bombing OR \"car bomb\" OR shelling OR explosion OR \"mass shooting\" OR \"terror attack\" OR coup OR riots OR earthquake OR wildfire OR flooding) sourcelang:english"
 GDELT_LIMIT = 250
 
 
@@ -57,6 +57,10 @@ def article_event(article: NewsArticle) -> NewsEvent:
 def parse_gdelt_response(body: bytes, *, retrieved_at: datetime) -> tuple[list[NewsEvent], int]:
     if len(body) > MAX_FEED_BYTES:
         raise NewsError("GDELT response exceeds the 1 MiB limit")
+    if not body.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"{"):
+        # GDELT reports query problems as plain text with HTTP 200; surface that text to the operator.
+        message = _plain_text(body[:400].decode("utf-8", "replace"), 200)
+        raise NewsError(f"GDELT returned a message instead of article metadata: {message or 'empty response'}")
     try:
         def invalid_constant(value):
             raise ValueError("Invalid JSON numeric constant")

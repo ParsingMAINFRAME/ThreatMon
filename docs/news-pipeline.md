@@ -23,6 +23,24 @@ The illustrative Iran/35-article scenario remains explicitly fictional. No speci
 
 Global Voices remains an independently fetched, attributed source under its existing policy. GDACS and NASA remain available in the secondary bulletin view. No new paid service, account or API key is required. Restricted BBC/Le Monde RSS feeds are not enabled.
 
+## GDELT bulk files (default)
+
+The DOC search API answered this project with HTTP 429 for every request over many hours, including a single small query. GDELT's rate-limit message directs such users to its published datasets, so the default `NEWS_GDELT_MODE=bulk` reads the [GDELT 2.0](https://blog.gdeltproject.org/gdelt-2-0-our-global-world-in-realtime/) Global Knowledge Graph files instead. GDELT publishes one file every 15 minutes listing the articles it monitored. No search API call is made in this mode.
+
+An import reads `lastupdate.txt` for the newest file time, builds file URLs locally on the fixed `data.gdeltproject.org` host, and downloads at most four unread files (one hour), oldest first. Downloads are capped at 16 MiB zipped and 96 MiB unzipped, with a single archive member. A persisted watermark means a later import reads only newer files; skipped older files mark the source as possibly incomplete. The 15-minute minimum interval and failure handling are unchanged.
+
+From each record only the page title, URL, publisher domain and file time are kept. A record is retained only when the headline rules can place it and GDELT's own location list for the article names the same country. A headline that also names a US state or Canadian province is not placed at a foreign city. Same-name towns remain a known error: GDELT itself geocoded a shooting in Athens, Alabama to Greece, and that headline was placed at Athens, Greece. GDELT coordinates are never used. The 250-article, seven-day retention still applies. Expect a handful of placed headlines per file, so regular polling is what builds coverage.
+
+Set `NEWS_GDELT_MODE=doc` to use the DOC search API described below.
+
+## Wikipedia Current events
+
+The [Current events portal](https://en.wikipedia.org/wiki/Portal:Current_events) is an editor-curated daily list of one-sentence entries, each citing sources. One bounded MediaWiki API request reads the pages for today and the two previous UTC days, with a descriptive User-Agent and the same 15-minute minimum interval. Only the incident-related sections are kept (armed conflicts and attacks, disasters and accidents, law and crime, politics and elections, health and environment, international relations), at most 120 entries.
+
+Entry text is written by Wikipedia contributors and reused under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) with attribution and a link to the portal page. It is not the linked publisher's headline. Each entry is stored against the first source URL it cites, so the reader can open the original report. The portal day is an editor-chosen event day and is kept as a provider timestamp, never as a publication time. Entries are placed and grouped by the same headline rules as every other article. Coverage depends on what volunteers have added and is incomplete.
+
+Al Jazeera and UN News feeds were reviewed and not enabled: their terms limit use to personal, non-commercial access.
+
 ## Articles versus provider observations
 
 A publisher article has a canonical URL identity. Preserve semantic query parameters such as article IDs; remove only known tracking parameters and fragments. Repeated observations do not create new articles. Retain richer publisher/author/license metadata and provider observations when the same canonical article appears through multiple sources.
@@ -33,11 +51,19 @@ Publication filters use actual publisher publication where supplied, otherwise e
 
 ## Candidate associations and geography
 
-Candidate matching requires compatible local-place, narrow incident-type and distinctive named/content clues, plus a bounded time interval. Every pair in a group must satisfy the rule; a chain of weak links cannot merge unrelated incidents. Country-only references, ambiguous places, conflicting dates/locations and unsupported headline types stay separate. The group retains the rule version, assignment revision and explanation.
+Rule version `headline-place-v2` reads each English headline for two things: an incident word (attack, strike, bombing, missile, drone, explosion, shooting, riot, coup, protest, fire, flood, earthquake, outage, crash) and a place from the built-in gazetteer in `app/news/gazetteer.py`.
 
-This is intentionally conservative and limited to the documented recognition vocabulary. A candidate group is an unverified association, not an asserted incident. Unknown severity remains unknown. Article URLs remain individually inspectable.
+**Placement.** A headline that reports an incident and names one clear place is put on the map at that place's reference point:
 
-No headline mention becomes a coordinate. [GEO](https://blog.gdeltproject.org/gdelt-geo-2-0-api-debuts/) maps mentions near search terms and can contain contextual or geocoding errors; the adapter does not use it to pin incidents. DOC alone cannot supply defensible city incident points. Candidate place hints stay textual and unlocated until supported by an authoritative event identity/location or reviewed incident evidence. A country mention is not replaced by its capital. This remains the principal gap between the implemented discovery pipeline and a populated real incident-dot map.
+- One recognized city: the city centre. `Ukraine bombs Moscow` is placed at Moscow.
+- Several places: only the one introduced by a targeting word (`in`, `on`, `near`, `hits`, `strikes`, `bombs` and similar). `Russia strikes Ukraine` is placed at Ukraine; `Iran and Israel trade attacks` stays unlocated.
+- A country alone: the country's rough geographic centre, never its capital, and only when the country is targeted or leads the headline. `Bomb blast kills three in Saudi Arabia` is placed at the centre of Saudi Arabia. `Flight to Israel diverted after attack` stays unlocated.
+
+Every such position carries `precision: approximate_area`, `confidence: low`, a label ending in `(place named in headline)` or `(country named in headline)`, and a basis sentence saying it is not a verified incident site. The map and detail panel show that wording. Headlines that are historical, speculative, ambiguous (`Tripoli` without its country, `Paris, Texas`), or that use an incident word figuratively (`heart attack`, `rail strike`, `under fire`, sport) stay unlocated. Publication names such as `New York Times` and a trailing `| Publisher` are not read as places. Publisher country, GDELT `SourceCountry` and [GEO](https://blog.gdeltproject.org/gdelt-geo-2-0-api-debuts/) results are never used for placement.
+
+**Association.** Articles from two or more publishers form one candidate event when they name the same place and incident type and every pair falls within 24 hours without conflicting explicit dates. Country-level matches must also share two content words, because a whole country is too broad to assume one incident. Every pair in a group must satisfy the rule; a chain of weak links cannot merge. The group retains the rule version, assignment revision and explanation. Article count per event drives the coverage-intensity color.
+
+**Known limits.** This is keyword matching, not verification. Separate incidents in one city on one day can be combined. A figurative or unrelated use of an incident word can slip through and produce a wrong marker. The gazetteer covers about 150 cities and 95 countries; other places, demonyms (`Syrian`, `Russian`) and non-English headlines are not placed. A candidate group is an unverified association, not an asserted incident. Unknown severity remains unknown. Article URLs remain individually inspectable.
 
 ## Refresh and failure contract
 

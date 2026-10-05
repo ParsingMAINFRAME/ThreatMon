@@ -18,7 +18,7 @@ flowchart LR
     Demo[Explicit synthetic fixtures] --> NewsAPI
 ```
 
-GDELT discovery is one bounded metadata request per permitted import, with a 250-result cap. Provider timestamps, first collection and actual publication dates remain distinct. Canonical URLs identify articles; a domain count is not independent corroboration. Candidate assignments carry a rule version and revision fingerprint. Unsupported incident geography remains unlocated. See the [complete news contract](news-pipeline.md).
+GDELT discovery is one bounded metadata request per permitted import, with a 250-result cap. Provider timestamps, first collection and actual publication dates remain distinct. Canonical URLs identify articles; a domain count is not independent corroboration. Candidate assignments carry a rule version and revision fingerprint. Incident headlines that name one clear place are placed at that place's approximate reference point with low confidence; everything else remains unlocated. See the [complete news contract](news-pipeline.md).
 
 Independent source caches retain last-good records, query watermarks, next permitted attempts and failure status. CLI imports and the optional explicitly started foreground GDELT poller share a cache lock. No scheduler or worker starts with the API. The demo never fills gaps in fetched coverage.
 
