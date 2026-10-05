@@ -80,6 +80,10 @@ class NewsError(ValueError):
         self.retry_after = retry_after
 
 
+class NewsFileMissing(NewsError):
+    pass
+
+
 class NewsCache(NewsModel):
     response: NewsResponse
     etag: str | None = Field(default=None, max_length=1024)
@@ -508,6 +512,8 @@ async def ingest_gdelt(path: Path | str, *, client: httpx.AsyncClient | None = N
 async def _download(client: httpx.AsyncClient, url: str, limit: int, now: datetime) -> bytes:
     async with client.stream("GET", url, headers={"User-Agent": "ThreatMon/0.4 (https://github.com/ParsingMAINFRAME/ThreatMon; bounded metadata client)"},
                              timeout=30, follow_redirects=False) as response:
+        if response.status_code == 404:
+            raise NewsFileMissing("GDELT file server returned HTTP 404; no immediate retry")
         if response.status_code != 200:
             raise NewsError(f"GDELT file server returned HTTP {response.status_code}; no immediate retry", _retry_after(response.headers.get("retry-after"), now))
         body = bytearray()
@@ -547,12 +553,22 @@ async def ingest_gdelt_bulk(path: Path | str, *, client: httpx.AsyncClient | Non
                 raise NewsError("GDELT listed a file dated in the future")
             times, skipped = file_times(latest, watermark)
             new_articles = []
+            read_times = []
             for time in times:
-                new_articles.extend(parse_gkg_file(await _download(client, file_url(time), MAX_ZIP_BYTES, now), file_time=time, retrieved_at=now))
-        if times:
-            start, end = times[0] - timedelta(minutes=15), times[-1]
+                try:
+                    body = await _download(client, file_url(time), MAX_ZIP_BYTES, now)
+                except NewsFileMissing:
+                    continue  # The newest listed file is often not uploaded yet; the others are still read.
+                new_articles.extend(parse_gkg_file(body, file_time=time, retrieved_at=now))
+                read_times.append(time)
+        if read_times:
+            start, end = read_times[0] - timedelta(minutes=15), read_times[-1]
+            # A missing file older than one that was read is a real gap; a missing newest file is retried next import.
+            skipped = skipped or any(time < read_times[-1] and time not in read_times for time in times)
+            latest = read_times[-1]
         else:
-            start, end = cache.query_window_start, cache.query_window_end
+            start, end = (cache.query_window_start, cache.query_window_end) if cache else (None, None)
+            latest = watermark
         existing = [article for event in previous.events for article in event.articles]
         combined = merge_articles([*existing, *new_articles])
         recent = [article for article in combined if (article.first_seen_at or article.retrieved_at) >= now - timedelta(days=7)]

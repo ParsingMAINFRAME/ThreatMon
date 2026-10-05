@@ -22,7 +22,7 @@
 
 1. Evaluate the saved 250-article discovery sample for relevance, duplicate/syndicated reporting and grouping recall. Establish reviewed examples before loosening candidate rules or adding feeds.
 2. Measure incident placement on real poller output: Wikipedia section, topic-heading and linked-place positions and the analyst review command are in place. Never substitute a capital or GEO mention point for a country-level mention.
-3. Verify refresh reliability over repeated authorized fetches, then choose a deployment model. The foreground poller exists, but no automatic service is active.
+3. Extend the one-hour refresh check to multi-day runs and choose a hosted deployment model. The poller and an optional Docker `poller` service exist; nothing starts them automatically.
 4. Add watchlists and source-backed exposure inputs.
 5. Add analyst notes and review states, followed by authentication and access controls.
 6. Add alert delivery only after refresh, deduplication and stale-source behavior are defined.

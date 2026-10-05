@@ -18,7 +18,7 @@ from app.domain.ingestion.service import ingest_connector
 def _print_news_result(result) -> None:
     records = [article for event in result.events for article in event.articles]
     print(json.dumps({"edition": result.edition, "fetch_state": result.fetch_state,
-                      "events": len(result.events), "articles": sum(article.record_kind == "article" for article in records),
+                      "events": len(result.events), "located_events": sum(event.scope == "located" for event in result.events), "articles": sum(article.record_kind == "article" for article in records),
                       "official_reports": sum(article.record_kind == "official_report" for article in records),
                       "fetched_at": result.fetched_at.isoformat() if result.fetched_at else None,
                       "last_attempt_at": result.last_attempt_at.isoformat() if result.last_attempt_at else None,
@@ -91,8 +91,9 @@ def main(argv: list[str] | None = None) -> int:
     news_ingest = news_commands.add_parser("ingest", help="Fetch or revalidate independent public RSS snapshots")
     news_ingest.add_argument("--cache-path", type=Path, help="NASA cache path; other feeds use deterministic sibling files")
     news_ingest.add_argument("--source", choices=["all", "globalvoices", "gdelt", "wikipedia", "gdacs", "nasa"], default="all")
-    news_poll = news_commands.add_parser("poll", help="Explicitly run one GDELT polling queue; never starts with the HTTP app")
-    news_poll.add_argument("--source", choices=["gdelt"], default="gdelt")
+    news_poll = news_commands.add_parser("poll", help="Explicitly run one news polling queue; never starts with the HTTP app")
+    news_poll.add_argument("--source", choices=["news", "gdelt", "wikipedia", "globalvoices"], default="news",
+                           help="news polls GDELT, Wikipedia Current events and Global Voices in turn")
     news_poll.add_argument("--cache-path", type=Path)
     news_poll.add_argument("--interval-seconds", type=int, help="900–86400; defaults to NEWS_POLL_INTERVAL_SECONDS")
     news_review = news_commands.add_parser(
@@ -122,9 +123,17 @@ def main(argv: list[str] | None = None) -> int:
             if not 900 <= interval <= 86400:
                 parser.error("--interval-seconds must be between 900 and 86400")
         try:
-            with news_lock(path):
+            with news_lock(path) as renew_lock:
                 if args.news_command == "poll":
-                    asyncio.run(poll_news(path, interval_seconds=interval, on_result=_print_news_result))
+                    import signal
+                    from app.news.polling import POLLED_SOURCES
+
+                    def stop_on_terminate(signum, frame):
+                        raise KeyboardInterrupt  # A container or service stop releases the cache lock like Ctrl+C.
+                    signal.signal(signal.SIGTERM, stop_on_terminate)
+                    sources = POLLED_SOURCES if args.source == "news" else (args.source,)
+                    asyncio.run(poll_news(path, interval_seconds=interval, on_result=_print_news_result, sources=sources,
+                                          renew_lock=renew_lock))
                     return 0
                 result = asyncio.run(ingest_sources(path, source=args.source))
         except NewsLockError as error:
