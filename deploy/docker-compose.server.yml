@@ -1,0 +1,38 @@
+# Always-on server stack: API, news poller and console behind Caddy with automatic HTTPS.
+# Run from the repository root:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.server.yml --env-file deploy/.env up -d --build
+# deploy/setup-server.sh writes deploy/.env and runs this for you. See docs/hosting.md.
+services:
+  backend:
+    environment:
+      ALLOWED_ORIGINS: '["https://${SITE_ADDRESS:?set SITE_ADDRESS in deploy/.env}"]'
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+    restart: unless-stopped
+
+  # The poller starts with the server stack instead of waiting for `--profile live`.
+  poller:
+    profiles: !reset []
+
+  frontend:
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in deploy/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    depends_on:
+      frontend:
+        condition: service_healthy
+
+volumes:
+  caddy-data:
+  caddy-config:

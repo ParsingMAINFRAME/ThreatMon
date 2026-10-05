@@ -1,0 +1,13 @@
+# SITE_ADDRESS is a host name such as 203-0-113-5.sslip.io; Caddy obtains its HTTPS certificate.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# The read-only API, for the future iPhone app: https://<site>/api/news -> backend /news
+	handle_path /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

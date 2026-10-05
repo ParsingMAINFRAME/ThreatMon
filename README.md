@@ -66,7 +66,7 @@ Open **[localhost:3000](http://localhost:3000)**. The default real-coverage edit
 docker compose down
 ```
 
-Data persists in the `threatroom-data` volume. The default services bind to your local machine. The optional Postgres service uses the `postgres` profile; the default app uses SQLite.
+Data persists in the `threatroom-data` volume. The default services bind to your local machine. To keep the map refreshing on an always-on server with HTTPS, see [always-on hosting](docs/hosting.md). The optional Postgres service uses the `postgres` profile; the default app uses SQLite.
 
 ## A two-minute walkthrough
 
