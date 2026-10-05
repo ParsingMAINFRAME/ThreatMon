@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -66,6 +66,11 @@ class NewsArticle(NewsModel):
     license_url: str | None = None
     source_window_start: AwareDatetime | None = None
     source_window_end: AwareDatetime | None = None
+    # Editor-supplied context from a curated listing (Wikipedia Current events): the portal section,
+    # the topic headings the entry sits under, and the article titles the entry links to.
+    editor_section: str | None = Field(default=None, max_length=100)
+    editor_topics: list[Annotated[str, Field(min_length=1, max_length=300)]] = Field(default_factory=list, max_length=4)
+    linked_titles: list[Annotated[str, Field(min_length=1, max_length=300)]] = Field(default_factory=list, max_length=32)
 
     @field_validator("published_at", "first_seen_at", "retrieved_at", "source_window_start", "source_window_end")
     @classmethod

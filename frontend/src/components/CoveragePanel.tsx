@@ -20,9 +20,9 @@ function safeCoverageUrl(value: string | null | undefined): string | null {
 
 function licenseLabel(value: string): string {
   const url = new URL(value);
-  const version = url.pathname.match(/^\/licenses\/by\/(\d+\.\d+)\/?$/)?.[1];
-  return ["creativecommons.org", "www.creativecommons.org"].includes(url.hostname) && version
-    ? `CC BY ${version} license`
+  const match = url.pathname.match(/^\/licenses\/(by|by-sa)\/(\d+\.\d+)\/?$/);
+  return ["creativecommons.org", "www.creativecommons.org"].includes(url.hostname) && match
+    ? `CC ${match[1].toUpperCase()} ${match[2]} license`
     : "Source license";
 }
 
@@ -130,6 +130,7 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
                     <p className="news-eyebrow">{isSyntheticRecord ? `Synthetic demo / ${recordLabel}` : recordLabel}</p>
                     <h4>{article.headline}</h4>
                     <p>{article.author ? <>By {article.author} / </> : null}{article.publisher}{isSyntheticRecord ? " / Demo source label" : ""}</p>
+                    {article.editor_section ? <p>Filed by editors under {[humanizeNewsLabel(article.editor_section), ...(article.editor_topics ?? [])].join(" › ")}. Editor filing, not verification.</p> : null}
                     {providers.length ? <p>Discovery provider{providers.length === 1 ? "" : "s"}: {providers.join(", ")}. Publisher attribution is separate.</p> : null}
                   </header>
                   <dl className="news-story-meta">

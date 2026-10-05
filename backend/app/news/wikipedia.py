@@ -54,6 +54,19 @@ def _sentence(wikitext: str) -> str:
     return _plain_text(text, 500).strip()
 
 
+def link_titles(wikitext: str) -> list[str]:
+    """Target article titles of the internal links in one line, in order, without duplicates or other namespaces."""
+    titles: list[str] = []
+    for target in re.findall(r"\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]", wikitext):
+        title = target.split("#")[0].replace("_", " ").strip()
+        if not title or ":" in title:
+            continue  # Files, categories and other namespaces are not article links.
+        title = title[0].upper() + title[1:]
+        if title not in titles and len(title) <= 300:
+            titles.append(title)
+    return titles
+
+
 def parse_current_events(body: bytes, *, retrieved_at: datetime) -> tuple[list[NewsEvent], int]:
     if len(body) > MAX_FEED_BYTES:
         raise NewsError("Wikipedia response exceeds the 1 MiB limit")
@@ -75,13 +88,24 @@ def parse_current_events(body: bytes, *, retrieved_at: datetime) -> tuple[list[N
                 raise ValueError
             page_url = "https://en.wikipedia.org/wiki/" + quote(page["title"].replace(" ", "_"), safe=":/")
             section = None
+            topics: list[tuple[int, str]] = []  # (bullet depth, heading) for the bullets above the current line
             for line in wikitext.splitlines():
                 heading = re.fullmatch(r"\s*'''([^']+)'''\s*", line)
                 if heading:
                     section = heading[1].strip().casefold()
+                    topics = []
                     continue
+                depth = len(line) - len(line.lstrip("*"))
+                if depth:
+                    topics = [topic for topic in topics if topic[0] < depth]
                 links = re.findall(r"\[(https://[^\s\]]+)(?:\s+([^\]]*))?\]", line)
-                if section not in SECTIONS or not line.startswith("*") or not links:
+                if depth and not links:
+                    # A bullet without a cited source is a topic heading, such as "[[Gaza war]]", for the entries nested under it.
+                    topic = (link_titles(line) or [_sentence(line.lstrip("* "))])[0]
+                    if topic:
+                        topics.append((depth, topic[:300]))
+                    continue
+                if section not in SECTIONS or not depth or not links:
                     continue
                 headline = _sentence(line.lstrip("* "))
                 try:
@@ -103,6 +127,8 @@ def parse_current_events(body: bytes, *, retrieved_at: datetime) -> tuple[list[N
                     author="Wikipedia contributors", license_url=WIKIPEDIA_LICENSE,
                     published_at=None, first_seen_at=retrieved_at, retrieved_at=retrieved_at,
                     source_window_start=day, source_window_end=min(day + timedelta(days=1), retrieved_at),
+                    editor_section=section, editor_topics=[topic for _, topic in topics][-4:],
+                    linked_titles=link_titles(re.sub(r"<ref[^>]*>.*?</ref>", " ", line, flags=re.DOTALL))[:32],
                     observations=[NewsObservation(provider_id="wikipedia", provider_url=page_url, provider_timestamp=day,
                                                   provider_timestamp_raw=page["title"].removeprefix(PAGE_PREFIX),
                                                   retrieved_at=retrieved_at, language="English")],
