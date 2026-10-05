@@ -46,6 +46,27 @@ class NewsObservation(NewsModel):
         return canonical_url(value)
 
 
+# Wikipedia coordinate types that name a place an incident can be reported at. Countries, rivers, mountains,
+# water bodies and the like are excluded: their single coordinate says little about where something happened.
+LINKED_PLACE_TYPES = ("event", "city", "landmark", "airport", "railwaystation", "edu", "isle",
+                      "adm3rd", "adm2nd", "adm1st", "state")
+
+
+class LinkedPlace(NewsModel):
+    """A place article an editor linked from an entry, with that article's own primary coordinate."""
+    title: str = Field(min_length=1, max_length=300)
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+    place_type: Literal[LINKED_PLACE_TYPES]  # type: ignore[valid-type]
+    url: str
+
+    @field_validator("url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        from app.news.urls import canonical_url
+        return canonical_url(value)
+
+
 class NewsArticle(NewsModel):
     id: str = Field(min_length=1, max_length=160)
     canonical_url: str | None
@@ -71,6 +92,7 @@ class NewsArticle(NewsModel):
     editor_section: str | None = Field(default=None, max_length=100)
     editor_topics: list[Annotated[str, Field(min_length=1, max_length=300)]] = Field(default_factory=list, max_length=4)
     linked_titles: list[Annotated[str, Field(min_length=1, max_length=300)]] = Field(default_factory=list, max_length=32)
+    linked_places: list[LinkedPlace] = Field(default_factory=list, max_length=32)
 
     @field_validator("published_at", "first_seen_at", "retrieved_at", "source_window_start", "source_window_end")
     @classmethod

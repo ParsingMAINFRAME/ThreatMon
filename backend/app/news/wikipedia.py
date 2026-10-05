@@ -11,7 +11,9 @@ import json
 import re
 from urllib.parse import quote, urlsplit
 
-from app.news.models import NewsArticle, NewsEvent, NewsObservation
+import httpx
+
+from app.news.models import LINKED_PLACE_TYPES, LinkedPlace, NewsArticle, NewsEvent, NewsObservation
 from app.news.service import MAX_FEED_BYTES, NewsError, _plain_text
 from app.news.urls import canonical_url
 
@@ -146,3 +148,75 @@ def parse_current_events(body: bytes, *, retrieved_at: datetime) -> tuple[list[N
         if isinstance(error, NewsError):
             raise
         raise NewsError("Wikipedia returned an unexpected Current events response") from error
+
+
+COORDINATE_BATCH = 50  # MediaWiki's per-request title limit for anonymous clients.
+MAX_COORDINATE_REQUESTS = 2
+USER_AGENT = "ThreatMon/0.4 (https://github.com/ParsingMAINFRAME/ThreatMon; read-only metadata client)"
+
+
+def coordinates_url(titles: list[str]) -> str:
+    """One request for the primary coordinates of up to 50 linked articles, following redirects."""
+    return (f"{WIKIPEDIA_API_URL}?action=query&prop=coordinates&coprimary=primary&coprop=type%7Cglobe&colimit=max"
+            f"&redirects=1&format=json&formatversion=2&titles={quote('|'.join(titles), safe='')}")
+
+
+def article_url(title: str) -> str:
+    return "https://en.wikipedia.org/wiki/" + quote(title.replace(" ", "_"), safe=":/(),'")
+
+
+def parse_coordinates(body: bytes) -> dict[str, LinkedPlace]:
+    """Requested title -> place, for linked articles whose primary coordinate has a usable place type."""
+    if len(body) > MAX_FEED_BYTES:
+        raise NewsError("Wikipedia coordinate response exceeds the 1 MiB limit")
+    try:
+        query = json.loads(body.decode("utf-8-sig"))["query"]
+        renamed = {item["from"]: item["to"] for key in ("normalized", "redirects") for item in query.get(key, [])}
+        places: dict[str, LinkedPlace] = {}
+        for page in query["pages"]:
+            if page.get("missing") or page.get("invalid") or page.get("ns", 0) != 0:
+                continue
+            coordinates = [item for item in page.get("coordinates", []) if item.get("primary", True) and item.get("globe", "earth") == "earth"]
+            # Wikipedia's type field may carry a population, as in "city(250000)".
+            place_type = str(coordinates[0].get("type") or "").split("(")[0] if len(coordinates) == 1 else ""
+            if place_type not in LINKED_PLACE_TYPES:
+                continue
+            places[page["title"]] = LinkedPlace(title=page["title"], lat=float(coordinates[0]["lat"]), lon=float(coordinates[0]["lon"]),
+                                                place_type=place_type, url=article_url(page["title"]))
+        resolved = {}
+        for title in {*places, *renamed}:
+            target = title
+            for _ in range(3):  # normalized, then redirected
+                target = renamed.get(target, target)
+            if target in places:
+                resolved[title] = places[target]
+        return resolved
+    except (KeyError, IndexError, ValueError, TypeError, UnicodeError) as error:
+        raise NewsError("Wikipedia returned an unexpected coordinate response") from error
+
+
+async def add_linked_places(client: httpx.AsyncClient, events: list[NewsEvent]) -> tuple[list[NewsEvent], str | None]:
+    """Attach linked place coordinates to entries. A failed lookup keeps the entries without them and reports why."""
+    titles: list[str] = []
+    for event in events:
+        for title in event.articles[0].linked_titles:
+            if title not in titles:
+                titles.append(title)
+    titles = titles[:COORDINATE_BATCH * MAX_COORDINATE_REQUESTS]
+    places: dict[str, LinkedPlace] = {}
+    try:
+        for start in range(0, len(titles), COORDINATE_BATCH):
+            response = await client.get(coordinates_url(titles[start:start + COORDINATE_BATCH]), timeout=15, follow_redirects=False,
+                                        headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+            if response.status_code != 200:
+                raise NewsError(f"Wikipedia coordinate lookup returned HTTP {response.status_code}")
+            places.update(parse_coordinates(response.content))
+    except (NewsError, httpx.HTTPError) as error:
+        message = str(error) if isinstance(error, NewsError) else "Wikipedia coordinate lookup failed"
+        return events, f"{message}; entries kept without linked place coordinates"
+    updated = []
+    for event in events:
+        article = event.articles[0]
+        linked = [places[title] for title in article.linked_titles if title in places]
+        updated.append(event.model_copy(update={"articles": [article.model_copy(update={"linked_places": linked})]}) if linked else event)
+    return updated, None
