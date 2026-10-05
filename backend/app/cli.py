@@ -109,9 +109,18 @@ def main(argv: list[str] | None = None) -> int:
     news_review.add_argument("--label", help="Place name for --move, such as 'Jabalia, Gaza Strip'")
     news_review.add_argument("--note", help="Why: which source supports the decision")
     news_review.add_argument("--reviewer", help="Who reviewed it")
+    news_report = news_commands.add_parser("report", help="Count stored events by map placement evidence")
+    news_report.add_argument("--cache-path", type=Path)
+    news_report.add_argument("--channel", choices=["news", "signals", "all"], default="news")
     args = parser.parse_args(argv)
     if args.command == "news" and args.news_command == "review":
         return _review(parser, args)
+    if args.command == "news" and args.news_command == "report":
+        from app.news.report import placement_report
+        from app.news.service import read_sources
+        path = args.cache_path or Path(get_settings().news_snapshot_path)
+        print(json.dumps(placement_report(read_sources(path, channel=args.channel)), indent=2))
+        return 0
     if args.command == "news":
         from app.news.service import ingest_sources
         from app.news.polling import NewsLockError, news_lock, poll_news

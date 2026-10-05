@@ -1,0 +1,21 @@
+{"_note": "SYNTHETIC SAMPLE in the MediaWiki coordinates response layout; coordinates are approximate reference points for tests only.",
+ "batchcomplete": true,
+ "query": {"pages": [
+  {"ns": 0, "title": "Kharkiv", "coordinates": [{"lat": 49.99, "lon": 36.23, "primary": true, "globe": "earth", "type": "city(1400000)"}]},
+  {"ns": 0, "title": "Kharkiv Oblast", "coordinates": [{"lat": 49.5, "lon": 36.5, "primary": true, "globe": "earth", "type": "adm1st"}]},
+  {"ns": 0, "title": "Liski", "coordinates": [{"lat": 50.98, "lon": 39.5, "primary": true, "globe": "earth", "type": "city(54000)"}]},
+  {"ns": 0, "title": "Voronezh Oblast", "coordinates": [{"lat": 50.9, "lon": 40.0, "primary": true, "globe": "earth", "type": "adm1st"}]},
+  {"ns": 0, "title": "Russia", "coordinates": [{"lat": 55.75, "lon": 37.62, "primary": true, "globe": "earth", "type": "country"}]},
+  {"ns": 0, "title": "Jabalia", "coordinates": [{"lat": 31.53, "lon": 34.48, "primary": true, "globe": "earth", "type": "city(50000)"}]},
+  {"ns": 0, "title": "Sagaing Region", "coordinates": [{"lat": 22.0, "lon": 95.0, "primary": true, "globe": "earth", "type": "adm1st"}]},
+  {"ns": 0, "title": "Pakistan", "coordinates": [{"lat": 33.68, "lon": 73.05, "primary": true, "globe": "earth", "type": "country"}]},
+  {"ns": 0, "title": "Zamfara State", "coordinates": [{"lat": 12.17, "lon": 6.25, "primary": true, "globe": "earth", "type": "adm1st"}]},
+  {"ns": 0, "title": "Belgorod", "coordinates": [{"lat": 50.6, "lon": 36.59, "primary": true, "globe": "earth", "type": "city(340000)"}]},
+  {"ns": 0, "title": "Balasore", "coordinates": [{"lat": 21.49, "lon": 86.93, "primary": true, "globe": "earth", "type": "city(120000)"}]},
+  {"ns": 0, "title": "Odisha", "coordinates": [{"lat": 20.27, "lon": 85.84, "primary": true, "globe": "earth", "type": "adm1st"}]},
+  {"ns": 0, "title": "Philippines", "coordinates": [{"lat": 14.6, "lon": 120.98, "primary": true, "globe": "earth", "type": "country"}]},
+  {"ns": 0, "title": "Lake Kivu", "coordinates": [{"lat": -2.0, "lon": 29.15, "primary": true, "globe": "earth", "type": "waterbody"}]},
+  {"ns": 0, "title": "Kathmandu", "coordinates": [{"lat": 27.71, "lon": 85.32, "primary": true, "globe": "earth", "type": "city(1000000)"}]},
+  {"ns": 0, "title": "Nairobi", "coordinates": [{"lat": -1.29, "lon": 36.82, "primary": true, "globe": "earth", "type": "city(4400000)"}]},
+  {"ns": 0, "title": "Geneva", "coordinates": [{"lat": 46.2, "lon": 6.15, "primary": true, "globe": "earth", "type": "city(200000)"}]}
+ ]}}
