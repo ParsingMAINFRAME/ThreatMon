@@ -267,8 +267,14 @@ def _aggregate(responses: list[NewsResponse], now: datetime, channel: str = "all
 def read_sources(path: Path | str, *, now: datetime | None = None, channel: str = "news") -> NewsResponse:
     if channel not in CHANNEL_SOURCES:
         raise ValueError("Unknown news channel")
+    from app.news.review import ReviewError, apply_reviews, load_reviews
     now = now or utc_now()
-    return _aggregate([read_news(path, now=now, source=source) for source in CHANNEL_SOURCES[channel]], now, channel)
+    response = _aggregate([read_news(path, now=now, source=source) for source in CHANNEL_SOURCES[channel]], now, channel)
+    try:
+        return response.model_copy(update={"events": apply_reviews(response.events, load_reviews(path))})
+    except ReviewError as error:
+        message = "; ".join(filter(None, [response.error, f"{error}; analyst reviews not applied"]))
+        return response.model_copy(update={"error": message[:500]})
 
 
 def _save_cache(path: Path, cache: NewsCache) -> None:

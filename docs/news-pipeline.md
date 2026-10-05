@@ -77,6 +77,18 @@ Rule version `headline-place-v4` reads each English headline for two things: an 
 
 Every such position carries `precision: approximate_area`, `confidence: low`, a label ending in `(place named in headline)`, `(country named in headline)` `(country named in topic heading)` or `(linked Wikipedia place)`, and a basis sentence saying it is not a verified incident site. The map and detail panel show that wording. Headlines that are historical, speculative, ambiguous (`Tripoli` without its country, `Paris, Texas`), or that use an incident word figuratively (`heart attack`, `rail strike`, `under fire`, `landslide victory`, `talks collapsed`, `stocks sank`, sport) stay unlocated. Publication names such as `New York Times` and a trailing `| Publisher` are not read as places. Publisher country, GDELT `SourceCountry` and [GEO](https://blog.gdeltproject.org/gdelt-geo-2-0-api-debuts/) results are never used for placement.
 
+**Analyst review.** An operator can correct an automatic position from the command line; the HTTP API stays read-only. Reviews are stored per article URL in `<snapshot>.placement-reviews.json` beside the news snapshots, so the poller never overwrites them and they survive regrouping. The event that currently contains the article takes its newest review.
+
+```bash
+uv run --frozen python -m app.cli news review --url <article-url> --confirm --note "Matches the cited report" --reviewer Ryan
+uv run --frozen python -m app.cli news review --url <article-url> --move 31.53 34.48 --label "Jabalia, Gaza Strip" --note "Report names Jabalia" --reviewer Ryan
+uv run --frozen python -m app.cli news review --url <article-url> --remove --note "No single place is supported" --reviewer Ryan
+uv run --frozen python -m app.cli news review --url <article-url> --clear
+uv run --frozen python -m app.cli news review --list
+```
+
+A confirmation raises the position's confidence to medium and applies only while the automatic position is the one the analyst saw. A moved position is labeled `(analyst-set position)` with medium confidence. A removal unlocates the event. The detail panel shows each review with its reviewer, time and note. A review is an analyst judgement, not an official incident location.
+
 **Association.** Articles from two or more publishers form one candidate event when they name the same place and incident type and every pair falls within 24 hours without conflicting explicit dates. Country-level matches must also share two content words, because a whole country is too broad to assume one incident. Every pair in a group must satisfy the rule; a chain of weak links cannot merge. The group retains the rule version, assignment revision and explanation. Article count per event drives the coverage-intensity color.
 
 **Known limits.** This is keyword matching, not verification. Separate incidents in one city on one day can be combined. A figurative or unrelated use of an incident word can slip through and produce a wrong marker. The gazetteer covers about 1,100 cities and 200 countries; smaller towns, other places, demonyms (`Syrian`, `Russian`) and non-English headlines are not placed. A candidate group is an unverified association, not an asserted incident. Unknown severity remains unknown. Article URLs remain individually inspectable.
