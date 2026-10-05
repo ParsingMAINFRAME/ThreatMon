@@ -66,6 +66,9 @@ export type NewsArticle = {
   license_url?: string | null;
   source_window_start?: string | null;
   source_window_end?: string | null;
+  editor_section?: string | null;
+  editor_topics?: string[];
+  linked_titles?: string[];
 };
 
 export type NewsEvent = {

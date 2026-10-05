@@ -107,3 +107,50 @@ def test_ingest_stores_wikipedia_entries_in_the_news_channel(tmp_path):
     assert status.state == "ok" and status.item_count == 3 and status.kind == "discovery"
     assert sum(event.scope == "located" for event in news.events) == 3
     assert read_sources(tmp_path / "news.json", now=NOW, channel="signals").events == []
+
+
+TOPIC_WIKITEXT = """'''Armed conflicts and attacks'''
+*[[Myanmar civil war (2021–present)|Myanmar civil war]]
+**Resistance fighters kill twelve soldiers and seize an outpost. [https://one.example/outpost (One)]
+**[[Tatmadaw|Junta]] forces retake a town in [[Sagaing Region]], [[Myanmar]]. [https://two.example/town (Two)]
+*[[Israel–Hezbollah conflict]]
+**Fighters kill four soldiers in an ambush. [https://three.example/ambush (Three)]
+*Militants kill nine villagers in an overnight raid. [https://four.example/raid (Four)]
+
+'''Politics and elections'''
+*[[Myanmar civil war]]
+**The junta postpones a vote. [https://five.example/vote (Five)]
+"""
+
+
+def topic_events():
+    events, _ = parse_current_events(body(page(text=TOPIC_WIKITEXT)), retrieved_at=NOW)
+    articles = {event.articles[0].publisher_id: event.articles[0] for event in events}
+    return articles, {event.articles[0].publisher_id: event for event in group_candidate_events(list(articles.values()))}
+
+
+def test_entries_keep_their_section_topic_headings_and_linked_titles():
+    articles, _ = topic_events()
+    assert articles["one.example"].editor_section == "armed conflicts and attacks"
+    assert articles["one.example"].editor_topics == ["Myanmar civil war (2021–present)"]
+    assert articles["two.example"].linked_titles == ["Tatmadaw", "Sagaing Region", "Myanmar"]
+    assert articles["four.example"].editor_topics == []  # A new top-level bullet ends the previous topic.
+    assert articles["five.example"].editor_section == "politics and elections"
+    first, _ = parse_current_events(body(page()), retrieved_at=NOW)
+    assert first[0].articles[0].editor_topics == ["Example war (2022–present)", "Example strikes on infrastructure"]
+    assert first[0].articles[0].linked_titles == ["Mayor of Kyiv", "Kyiv", "Ukraine"]
+
+
+def test_armed_conflict_section_names_the_event_type_and_a_topic_country_places_unplaced_entries():
+    _, placed = topic_events()
+    outpost = placed["one.example"]
+    assert outpost.category == "attack" and outpost.scope == "located"
+    assert outpost.location.label == "Myanmar (country named in topic heading)"
+    assert "names no place itself" in outpost.location.basis and outpost.location.confidence == "low"
+    # The entry's own text wins over its topic heading.
+    assert placed["two.example"].location.label == "Myanmar (country named in headline)"
+    # A heading that pairs two parties, or no heading at all, places nothing.
+    assert placed["three.example"].category == "attack" and placed["three.example"].scope == "unlocated"
+    assert placed["four.example"].category == "attack" and placed["four.example"].scope == "unlocated"
+    # Outside the armed-conflict section an entry still needs an incident word.
+    assert placed["five.example"].scope == "unlocated" and placed["five.example"].category == "News report"

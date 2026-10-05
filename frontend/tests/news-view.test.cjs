@@ -281,7 +281,7 @@ test('map color groups follow the reported event type and default to other news'
   for (const [category, expected] of [
     ['attack', 'conflict'], ['explosion', 'conflict'], ['shooting', 'conflict'],
     ['unrest', 'unrest'], ['protest', 'unrest'],
-    ['earthquake', 'disaster'], ['flood', 'disaster'], ['fire', 'disaster'], ['tropical_cyclone', 'disaster'], ['natural_hazard', 'disaster'],
+    ['earthquake', 'disaster'], ['flood', 'disaster'], ['fire', 'disaster'], ['tropical_cyclone', 'disaster'], ['natural_hazard', 'disaster'], ['storm', 'disaster'], ['landslide', 'disaster'], ['volcano', 'disaster'],
     ['collision', 'accident'], ['outage', 'accident'],
     ['world_news', 'other'], ['News report', 'other'], ['cybersecurity', 'other'], ['', 'other'], [' Attack ', 'conflict'],
   ]) assert.equal(newsEventTypeGroup(category), expected, category);
