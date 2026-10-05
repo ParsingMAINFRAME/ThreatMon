@@ -26,6 +26,8 @@ function licenseLabel(value: string): string {
     : "Source license";
 }
 
+const REVIEW_ACTIONS = { confirmed: "Position checked against the sources", moved: "Position set", removed: "Map position removed" } as const;
+
 export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
   if (!event) {
     return (
@@ -51,7 +53,10 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
   const coverageHeading = hasOfficialReports ? (hasNewsArticles ? "Coverage records" : "Official reports") : "News articles";
   const location = event.scope === "located" ? event.location : null;
   const locationSourceUrl = isDemo ? null : safeCoverageUrl(location?.source_url);
-  const locationDescription = event.scope === "global"
+  const review = isDemo ? null : event.placement_review ?? null;
+  const locationDescription = review?.action === "removed"
+    ? "No map position: an analyst found the sources support no single place"
+    : event.scope === "global"
     ? "Global relevance; no single incident location"
     : location?.label ?? "Location not established; no map point assigned";
 
@@ -82,6 +87,7 @@ export function CoveragePanel({ event, asOf, edition }: CoveragePanelProps) {
         <div><dt>Severity</dt><dd>{humanizeNewsLabel(event.severity)}</dd></div>
         {event.source_alert_level ? <div><dt>Source-model alert</dt><dd>{event.source_alert_level}. Source assessment, not confirmed impact.</dd></div> : null}
         <div><dt>Location</dt><dd>{locationDescription}</dd></div>
+        {review ? <div className="news-placement-review"><dt>Analyst review</dt><dd>{REVIEW_ACTIONS[review.action]} by {review.reviewer}, {formatNewsTime(review.reviewed_at)}. {review.note}</dd></div> : null}
         <div><dt>Latest publication (UTC)</dt><dd>{event.freshest_published_at ? formatNewsTime(event.freshest_published_at) : "Not reported"}</dd></div>
         {event.freshest_collected_at ? <div><dt>Latest first collection (UTC)</dt><dd>{formatNewsTime(event.freshest_collected_at)}</dd></div> : null}
         <div><dt>Latest retrieval (UTC)</dt><dd>{formatNewsTime(event.last_retrieved_at)}</dd></div>

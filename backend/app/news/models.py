@@ -123,6 +123,46 @@ class NewsArticle(NewsModel):
         return self
 
 
+class PlacementReview(NewsModel):
+    """An analyst's decision about the map position of the event containing one article.
+
+    Recorded through the operator CLI, never the HTTP API. Keyed by article URL because
+    event identities change as grouping is recomputed.
+    """
+    article_url: str
+    action: Literal["confirmed", "moved", "removed"]
+    note: str = Field(min_length=1, max_length=500)
+    reviewer: str = Field(min_length=1, max_length=100)
+    reviewed_at: AwareDatetime
+    # The automatic position the analyst saw; a confirmation lapses when that position changes.
+    reviewed_label: str | None = Field(default=None, max_length=300)
+    lat: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    lon: float | None = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
+    place_label: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator("article_url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        from app.news.urls import canonical_url
+        return canonical_url(value)
+
+    @field_validator("reviewed_at")
+    @classmethod
+    def utc_timestamp(cls, value: datetime) -> datetime:
+        return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def complete_action(self) -> "PlacementReview":
+        position = (self.lat, self.lon, self.place_label)
+        if self.action == "moved" and None in position:
+            raise ValueError("A moved position needs a latitude, longitude and place label")
+        if self.action != "moved" and any(value is not None for value in position):
+            raise ValueError("Only a moved position carries coordinates")
+        if self.action == "confirmed" and self.reviewed_label is None:
+            raise ValueError("A confirmation records the position it confirms")
+        return self
+
+
 class NewsEvent(NewsModel):
     id: str = Field(min_length=1, max_length=160)
     title: str = Field(min_length=1, max_length=500)
@@ -142,6 +182,7 @@ class NewsEvent(NewsModel):
     grouping_version: str | None = Field(default=None, max_length=100)
     place_hints: list[str] = Field(default_factory=list, max_length=8)
     assignment_revision: str | None = Field(default=None, max_length=160)
+    placement_review: PlacementReview | None = None
 
     @model_validator(mode="after")
     def consistent_evidence(self) -> "NewsEvent":
