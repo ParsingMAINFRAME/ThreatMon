@@ -1,6 +1,6 @@
 # News events and source coverage
 
-The primary view is incident news: GDELT metadata discovery and attributed Global Voices articles. GDACS hazard bulletins and NASA agency updates are secondary at `/signals?view=bulletins`; the USGS/CISA register remains at `/signals`. News markers use **coverage intensity**, based on retained unique articles: green 1–10, amber 11–30, red 31+. Severity and reporting status are separate detail fields. Spatial navigation groups remain neutral and count separate events.
+The primary view is incident news: GDELT metadata discovery and attributed Global Voices articles. GDACS hazard bulletins and NASA agency updates are secondary at `/signals?view=bulletins`; the USGS/CISA register remains at `/signals`. Map marker color names the reported event type (red attacks and strikes, orange unrest, blue natural hazards, purple accidents and outages, gray other news); marker size and number give retained unique articles. Event cards keep **coverage intensity**: green 1–10, amber 11–30, red 31+. Severity and reporting status are separate detail fields. Spatial navigation groups remain neutral and count separate events.
 
 See [the incident-news pipeline](news-pipeline.md) for discovery limits, conservative candidate grouping, provider timestamps, refresh operation and the remaining geographic gap.
 
@@ -20,7 +20,7 @@ The illustrative **Iran explosion / 35 articles** scenario is fictional demonstr
 
 Severity describes supported event impact. It does not rise because an event has more articles, more publishers, or a larger map marker. Retain an explicit unknown value when impact evidence is absent. Publication by an official organization confirms the origin of that publication; it does not by itself establish a severe threat.
 
-Marker color encodes collected article volume, never that severity value. Filtering the coverage can therefore change a marker's count and color while leaving its severity unchanged. Zero articles and official-only reports receive no news-intensity band.
+Marker color encodes the reported event type and marker size encodes collected article volume, never that severity value. Filtering the coverage can therefore change a marker's count and size while leaving its severity unchanged. Zero articles and official-only reports receive no news-intensity band.
 
 Locate events from attached geographic evidence, or from one clear place named in an incident headline under the [headline placement rules](news-pipeline.md#candidate-associations-and-geography). A headline placement is always labeled approximate and low confidence, and a country is shown at its rough centre, not its capital. Publisher headquarters and a story's source country never establish a position. Preserve location precision and provenance; a regional label must not masquerade as an exact coordinate. Unlocated records remain accessible in the register. Synthetic demo points are explicitly illustrative.
 

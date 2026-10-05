@@ -26,7 +26,7 @@ Built to make the data boundary inspectable: typed contracts, deterministic grou
 
 ## Explore the console
 
-- **Incident news (`/`):** event hotspots count collected unique articles. Coverage-intensity colors are green 1–10, amber 11–30 and red 31+; severity and reporting status remain separate. Neutral spatial groups open a picker of distinct events. Headlines without one clear named place remain unlocated.
+- **Incident news (`/`):** event hotspots on a dark map are colored by reported event type (red attacks and strikes, orange unrest, blue natural hazards, purple accidents and outages, gray other news) and sized by collected unique articles; event cards use coverage-intensity colors green 1–10, amber 11–30 and red 31+; severity and reporting status remain separate. Neutral spatial groups open a picker of distinct events. Headlines without one clear named place remain unlocated.
 - **Coverage panel:** time filters, publisher breadth, grouping rationale, geographic confidence, and article-level timestamps stay beside the map. Snapshot articles link to their original publisher; synthetic stories open a labeled demonstration preview.
 - **Real news first:** the default edition reads GDELT discovery metadata and attributed Global Voices articles. Conservative cross-publisher associations are explicitly unverified candidates. GDELT is a discovery provider, not the publisher; capped query results never represent worldwide totals. GDACS and NASA move to `/signals?view=bulletins`. Synthetic 5-story and 35-story scenarios remain an explicit demo edition.
 - **World atlas:** locally rendered Natural Earth coastlines, cited event points, coordinate readouts, bounded zoom and pan, and clear coverage counts. Keyboard controls and a point index make overlapping markers accessible.
@@ -40,7 +40,7 @@ This is a portfolio application with bounded snapshot ingestion and an optional 
 
 ## What the map represents
 
-News hotspots count **deduplicated collected articles**, not casualties, severity or independent corroboration. Green/amber/red encode that article volume. Candidate associations require compatible place, incident type, distinctive clues and times; uncertain matching remains labeled. DOC metadata and headline place mentions do not establish incident coordinates, so this milestone does not fabricate a populated city-dot map. See the [pipeline contract and geographic gap](docs/news-pipeline.md).
+News hotspots count **deduplicated collected articles**, not casualties, severity or independent corroboration. Marker size and the card colors encode that article volume; marker color is the reported event type, not severity. Candidate associations require compatible place, incident type, distinctive clues and times; uncertain matching remains labeled. DOC metadata and headline place mentions do not establish incident coordinates, so this milestone does not fabricate a populated city-dot map. See the [pipeline contract and geographic gap](docs/news-pipeline.md).
 
 The secondary GDACS view uses provider event IDs and approximate hazard reference locations; repeat episodes are revisions, not new stories. Official-bulletin counts remain distinct from news articles. NASA agency updates are secondary, too.
 
